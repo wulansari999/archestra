@@ -1,6 +1,7 @@
 import type { IncomingHttpHeaders } from "node:http";
 import type { Permissions } from "@shared";
 import { vi } from "vitest";
+import { UserModel } from "@/models";
 import {
   beforeEach,
   describe,
@@ -10,6 +11,11 @@ import {
 } from "@/test";
 import { hasPermission } from "./utils";
 
+vi.mock("@/models", () => ({
+  UserModel: {
+    getUserPermissions: vi.fn(),
+  },
+}));
 // Mock the better-auth module
 vi.mock("./better-auth", () => ({
   auth: {
@@ -23,6 +29,10 @@ vi.mock("./better-auth", () => ({
 import { auth as betterAuth } from "./better-auth";
 
 // Type the mocked functions
+const mockUserModel = UserModel as unknown as {
+  getUserPermissions: MockedFunction<typeof UserModel.getUserPermissions>;
+};
+
 const mockBetterAuth = betterAuth as unknown as {
   api: {
     hasPermission: MockedFunction<typeof betterAuth.api.hasPermission>;
@@ -35,6 +45,11 @@ type ApiKey = Awaited<ReturnType<typeof betterAuth.api.verifyApiKey>>["key"];
 describe("hasPermission", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockUserModel.getUserPermissions.mockResolvedValue({
+      agent: ["read", "create", "update", "delete", "admin"],
+      mcpServerInstallation: ["admin"],
+      team: ["read"],
+    });
   });
 
   describe("session-based authentication", () => {
@@ -98,7 +113,10 @@ describe("hasPermission", () => {
       mockBetterAuth.api.verifyApiKey.mockResolvedValue({
         valid: true,
         error: null,
-        key: makeApiKey({ referenceId: "user1" }),
+        key: makeApiKey({
+          referenceId: "user1",
+          metadata: { organizationId: "org-1" },
+        }),
       });
 
       const result = await hasPermission(permissions, headers);
@@ -106,6 +124,35 @@ describe("hasPermission", () => {
       expect(result).toEqual({ success: true, error: null });
       expect(mockBetterAuth.api.verifyApiKey).toHaveBeenCalledWith({
         body: { key: "Bearer api-key-123" },
+      });
+    });
+
+    test("should reject when API key owner lacks required permissions", async () => {
+      const permissions: Permissions = { agent: ["admin"] };
+      const headers: IncomingHttpHeaders = {
+        authorization: "Bearer limited-user-key",
+      };
+
+      mockBetterAuth.api.hasPermission.mockRejectedValue(
+        new Error("No session"),
+      );
+      mockBetterAuth.api.verifyApiKey.mockResolvedValue({
+        valid: true,
+        error: null,
+        key: makeApiKey({
+          referenceId: "user-limited",
+          metadata: { organizationId: "org-1" },
+        }),
+      });
+      mockUserModel.getUserPermissions.mockResolvedValue({
+        agent: ["read"],
+      });
+
+      const result = await hasPermission(permissions, headers);
+
+      expect(result).toEqual({
+        success: false,
+        error: expect.objectContaining({ message: "Forbidden" }),
       });
     });
 
@@ -223,7 +270,10 @@ describe("hasPermission", () => {
       mockBetterAuth.api.verifyApiKey.mockResolvedValue({
         valid: true,
         error: null,
-        key: makeApiKey({ referenceId: "user1" }),
+        key: makeApiKey({
+          referenceId: "user1",
+          metadata: { organizationId: "org-1" },
+        }),
       });
 
       const result = await hasPermission(permissions, headers);
@@ -256,7 +306,10 @@ describe("hasPermission", () => {
         mockBetterAuth.api.verifyApiKey.mockResolvedValue({
           valid: true,
           error: null,
-          key: makeApiKey({ referenceId: "user1" }),
+          key: makeApiKey({
+            referenceId: "user1",
+            metadata: { organizationId: "org-1" },
+          }),
         });
 
         const result = await hasPermission(permissions, headers);

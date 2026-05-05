@@ -44,12 +44,22 @@ export const hasPermission = async (
         const apiKeyResult = await betterAuth.api.verifyApiKey({
           body: { key: authHeader },
         });
-        if (apiKeyResult?.valid) {
-          // API keys have all permissions, so allow the request
+        if (apiKeyResult?.valid && apiKeyResult.key?.referenceId) {
           logger.trace(
-            "[hasPermission] Valid API key found, granting all permissions",
+            { apiKeyUserId: apiKeyResult.key.referenceId },
+            "[hasPermission] Valid API key found, checking owner permissions",
           );
-          return { success: true, error: null };
+
+          const hasAllPermissions = await checkUserPermissions({
+            userId: apiKeyResult.key.referenceId,
+            organizationId: apiKeyResult.key.metadata?.organizationId ?? "",
+            permissions,
+          });
+
+          return {
+            success: hasAllPermissions,
+            error: hasAllPermissions ? null : new Error("Forbidden"),
+          };
         }
         logger.trace("[hasPermission] API key verification returned invalid");
       } catch (_apiKeyError) {
@@ -81,4 +91,36 @@ export const userHasPermission = async (
     organizationId,
   );
   return permissions[resource]?.includes(action) ?? false;
+};
+
+const checkUserPermissions = async (params: {
+  userId: string;
+  organizationId: string;
+  permissions: Permissions;
+}): Promise<boolean> => {
+  const { userId, organizationId, permissions } = params;
+
+  if (!organizationId) {
+    logger.trace("[hasPermission] API key missing organization context");
+    return false;
+  }
+
+  const permissionEntries = Object.entries(permissions);
+
+  for (const [resource, actions] of permissionEntries) {
+    for (const action of actions) {
+      const hasAccess = await userHasPermission(
+        userId,
+        organizationId,
+        resource as Resource,
+        action as Action,
+      );
+
+      if (!hasAccess) {
+        return false;
+      }
+    }
+  }
+
+  return true;
 };
