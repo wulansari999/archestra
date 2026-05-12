@@ -1,3 +1,4 @@
+import { stripDanglingToolCalls } from "@shared";
 import {
   convertToModelMessages,
   type FilePart,
@@ -188,9 +189,13 @@ export class A2AManager {
           : task && taskWasSwitchedToWorkingState
             ? task.history
             : [];
-      const contextUiMessages = contextDbMessages.map(
+      const rawContextUiMessages = contextDbMessages.map(
         (m) => m.content as UIMessage,
       );
+      // Strip dangling tool calls that lack completed results (e.g., from
+      // interrupted executions). This prevents Anthropic API validation errors
+      // about tool_use blocks without corresponding tool_result blocks.
+      const contextUiMessages = stripDanglingToolCalls(rawContextUiMessages);
       const requestMessages: ModelMessage[] =
         await convertToModelMessages(contextUiMessages);
 
