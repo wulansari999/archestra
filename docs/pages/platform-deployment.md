@@ -321,7 +321,7 @@ Practical starting point for worker autoscaling:
 
 #### Cloud Provider Configuration (Streaming and Session Affinity)
 
-Archestra Platform needs longer upstream load balancer timeouts for streaming responses. When running more than one platform pod, deployments that serve chat traffic through an ingress or load balancer should also enable sticky sessions so a browser session continues to reach the same backend pod.
+**⚠️ IMPORTANT:** Archestra Platform needs longer upstream load balancer timeouts for streaming responses. When running more than one platform pod, deployments that serve chat traffic through an ingress or load balancer should also enable sticky sessions so a browser session continues to reach the same backend pod (for performance-sensitive in-memory session reuse).
 
 ##### Google Cloud Platform (GKE)
 
