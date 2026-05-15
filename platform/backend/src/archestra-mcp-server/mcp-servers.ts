@@ -689,7 +689,6 @@ async function handleEditMcpDescription(
     }
 
     const descriptionFields = [
-      "name",
       "icon",
       "description",
       "docsUrl",
