@@ -1570,8 +1570,8 @@ describe("SlackProvider.handleSlashCommandSocket", () => {
     const { provider, response, fetchSpy } = setup();
     const ack = vi.fn().mockRejectedValue(new Error("socket not ready"));
 
-    // biome-ignore lint/suspicious/noExplicitAny: test-only — call private
     await expect(
+      // biome-ignore lint/suspicious/noExplicitAny: test-only — call private
       (provider as any).handleSlashCommandSocket(slashBody, ack),
     ).resolves.toBeUndefined();
 
@@ -1587,8 +1587,8 @@ describe("SlackProvider.handleSlashCommandSocket", () => {
     const ack = vi.fn().mockRejectedValue(new Error("socket not ready"));
     const bodyWithoutUrl = { ...slashBody, response_url: undefined };
 
-    // biome-ignore lint/suspicious/noExplicitAny: test-only — call private
     await expect(
+      // biome-ignore lint/suspicious/noExplicitAny: test-only — call private
       (provider as any).handleSlashCommandSocket(bodyWithoutUrl, ack),
     ).resolves.toBeUndefined();
 
