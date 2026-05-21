@@ -36,8 +36,18 @@ const isDevelopment = !isProduction;
 
 const appVersion = process.env.ARCHESTRA_VERSION || packageJson.version;
 
-const frontendBaseUrl =
-  process.env.ARCHESTRA_FRONTEND_URL?.trim() || "http://localhost:3000";
+const frontendUrl = process.env.ARCHESTRA_FRONTEND_URL?.trim();
+
+// Always-defined frontend URL with a localhost default — used for issuer,
+// authorization_endpoint, browser-facing redirects.
+const frontendBaseUrl = frontendUrl || "http://localhost:3000";
+
+// Public origin advertised in OAuth/MCP metadata. Only set when an operator
+// explicitly configures ARCHESTRA_FRONTEND_URL. When null, metadata falls back
+// to the request Host (so local dev and Docker-direct access keep working).
+// Lets deployments behind ingress publish correct URLs without enabling
+// ARCHESTRA_TRUST_PROXY.
+const publicOrigin = frontendUrl ? frontendUrl.replace(/\/$/, "") : null;
 const DEFAULT_POSTHOG_KEY = "phc_FFZO7LacnsvX2exKFWehLDAVaXLBfoBaJypdOuYoTk7";
 const DEFAULT_POSTHOG_HOST = "https://eu.i.posthog.com";
 
@@ -514,6 +524,7 @@ export const getAnalyticsConfig = () => ({
 
 const config = {
   frontendBaseUrl,
+  publicOrigin,
   api: {
     host: isDevelopment ? "127.0.0.1" : "0.0.0.0",
     port: getPortFromUrl(),
@@ -548,6 +559,7 @@ const config = {
   agents: {
     advancedToolFeaturesEnabled:
       process.env.ARCHESTRA_AGENTS_ADVANCED_TOOL_FEATURES_ENABLED === "true",
+    skillsEnabled: process.env.ARCHESTRA_AGENTS_SKILLS_ENABLED === "true",
     incomingEmail: {
       provider: parseIncomingEmailProvider(),
       outlook: {
@@ -597,11 +609,16 @@ const config = {
       baseUrl:
         process.env.ARCHESTRA_OPENROUTER_BASE_URL ||
         "https://openrouter.ai/api/v1",
+      // OpenRouter attribution must always identify the product, never the
+      // deployment host (which would leak `localhost`/internal URLs).
       referer:
-        process.env.ARCHESTRA_OPENROUTER_REFERER ||
-        process.env.ARCHESTRA_FRONTEND_URL?.trim() ||
-        frontendBaseUrl,
+        process.env.ARCHESTRA_OPENROUTER_REFERER?.trim() ||
+        "https://archestra.ai",
       title: process.env.ARCHESTRA_OPENROUTER_TITLE || DEFAULT_APP_NAME,
+      // Comma-separated OpenRouter marketplace categories for app attribution.
+      categories:
+        process.env.ARCHESTRA_OPENROUTER_CATEGORIES?.trim() ||
+        "general-chat,personal-agent",
     },
     anthropic: {
       baseUrl:
