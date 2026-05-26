@@ -47,8 +47,9 @@ RUN git clone --depth 1 --branch "${DOCKER_CLI_VERSION}" https://github.com/dock
     # CVE-2026-34986: go-jose uncaught exception fixed in >= 4.1.4
     go get github.com/go-jose/go-jose/v4@v4.1.4 && \
     # x/sys/x/term must be pinned for `go mod vendor` to find windows/registry and plan9 sub-pkgs.
-    go get golang.org/x/sys@v0.42.0 && \
-    go get golang.org/x/term@v0.42.0 && \
+    # Versions must satisfy x/net@v0.55.0 requirements: x/sys >= v0.45.0, x/term >= v0.43.0.
+    go get golang.org/x/sys@v0.45.0 && \
+    go get golang.org/x/term@v0.43.0 && \
     # golang.org/x/net <0.55.0: CVE-2026-39821 (CRITICAL); fixed in >= 0.55.0.
     # Must be the LAST `go get` before `go mod vendor` — earlier `go get`s for grpc/otel/x/sys
     # transitively pull older x/net and would otherwise override our explicit requirement.
