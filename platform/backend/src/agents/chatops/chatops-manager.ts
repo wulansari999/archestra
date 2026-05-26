@@ -709,9 +709,18 @@ export class ChatOpsManager {
 
     // Build the full message with context — use cleanedMessageText so
     // the "AgentName >" prefix is stripped from what the LLM sees
-    let fullMessage = cleanedMessageText;
+    const providerLabel =
+      provider.providerId === "slack"
+        ? "Slack"
+        : provider.providerId === "ms-teams"
+          ? "MS Teams"
+          : provider.providerId;
+    const threadIdForPrefix = message.threadId ?? message.messageId;
+    const systemPrefix = `(${providerLabel} conversation, thread id: ${threadIdForPrefix})`;
+
+    let fullMessage = `${systemPrefix}\n\n${cleanedMessageText}`;
     if (contextMessages.length > 0) {
-      fullMessage = `Previous conversation:\n${contextMessages.join("\n")}\n\nUser: ${cleanedMessageText}`;
+      fullMessage = `${systemPrefix}\n\nPrevious conversation:\n${contextMessages.join("\n")}\n\nUser: ${cleanedMessageText}`;
     }
 
     // Merge history attachments with current message attachments
