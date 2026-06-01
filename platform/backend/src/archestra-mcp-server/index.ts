@@ -1,7 +1,9 @@
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import {
   ARCHESTRA_TOOL_PREFIX,
+  ARCHESTRA_TOOL_SHORT_NAMES,
   type ArchestraToolFullName,
+  type ArchestraToolShortName,
   getArchestraToolFullName,
   getArchestraToolShortName,
   isAgentTool,
@@ -124,6 +126,7 @@ export function getArchestraMcpTools() {
     return {
       ...tool,
       name: archestraMcpBranding.getToolName(shortName),
+      description: rewriteBuiltInToolDescription(tool.description),
     };
   });
 }
@@ -207,6 +210,24 @@ function resolveArchestraToolName(toolName: string): string | null {
   }
 
   return getArchestraToolFullName(shortName);
+}
+
+function rewriteBuiltInToolDescription(
+  description: string | undefined,
+): string | undefined {
+  if (!description) {
+    return description;
+  }
+
+  let rewritten = description;
+  for (const shortName of ARCHESTRA_TOOL_SHORT_NAMES) {
+    rewritten = rewritten.replace(
+      new RegExp(`\\b${shortName}\\b`, "g"),
+      archestraMcpBranding.getToolName(shortName as ArchestraToolShortName),
+    );
+  }
+
+  return rewritten;
 }
 
 function validateToolResult(

@@ -2518,16 +2518,51 @@ export async function generateConversationTitle(
 function getUnavailableToolErrorDetails(
   error: unknown,
 ): UnavailableToolErrorDetails | null {
-  if (!NoSuchToolError.isInstance(error)) {
+  if (NoSuchToolError.isInstance(error)) {
+    return {
+      type: "unavailable_tool",
+      message: UNAVAILABLE_TOOL_ERROR_MESSAGE,
+      requestedToolName: error.toolName,
+      availableToolNames: error.availableTools ?? [],
+      originalErrorMessage: error.message,
+    };
+  }
+
+  const parsedError = parseUnavailableToolErrorMessage(error);
+  if (!parsedError) {
     return null;
   }
 
   return {
     type: "unavailable_tool",
     message: UNAVAILABLE_TOOL_ERROR_MESSAGE,
-    requestedToolName: error.toolName,
-    availableToolNames: error.availableTools ?? [],
-    originalErrorMessage: error.message,
+    requestedToolName: parsedError.requestedToolName,
+    availableToolNames: parsedError.availableToolNames,
+    originalErrorMessage: parsedError.originalErrorMessage,
+  };
+}
+
+function parseUnavailableToolErrorMessage(error: unknown): {
+  requestedToolName: string;
+  availableToolNames: string[];
+  originalErrorMessage: string;
+} | null {
+  const message = error instanceof Error ? error.message : String(error);
+  const match = message.match(
+    /^Model tried to call unavailable tool '([^']+)'\. Available tools: (.*)\.$/s,
+  );
+
+  if (!match) {
+    return null;
+  }
+
+  return {
+    requestedToolName: match[1],
+    availableToolNames: match[2]
+      .split(",")
+      .map((toolName) => toolName.trim())
+      .filter(Boolean),
+    originalErrorMessage: message,
   };
 }
 

@@ -428,6 +428,51 @@ describe("POST /api/chat toUIMessageStream onError deduplication", () => {
     expect(persistedErrors).toHaveLength(0);
   });
 
+  test("formats provider-wrapped unavailable tool messages as tool-level errors", async ({
+    expect,
+  }) => {
+    const { default: ConversationChatErrorModel } = await import(
+      "@/models/conversation-chat-error"
+    );
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/chat",
+      payload: {
+        id: conversationId,
+        messages: [
+          {
+            id: "msg-1",
+            role: "user",
+            parts: [{ type: "text", text: "hello" }],
+          },
+        ],
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    await executionPromise;
+    expect(capturedInnerOnError).toBeDefined();
+
+    const payload = capturedInnerOnError?.(
+      new Error(
+        "Model tried to call unavailable tool 'list_skills'. Available tools: branded__list_skills, branded__activate_skill.",
+      ),
+    );
+
+    expect(payload).toContain(
+      "The requested tool is not available in this chat.",
+    );
+    expect(payload).toContain('"requestedToolName": "list_skills"');
+    expect(payload).toContain("branded__list_skills");
+    expect(payload).toContain("branded__activate_skill");
+
+    await new Promise((resolve) => setImmediate(resolve));
+    const persistedErrors =
+      await ConversationChatErrorModel.findByConversation(conversationId);
+    expect(persistedErrors).toHaveLength(0);
+  });
+
   test("formats each distinct unavailable tool error independently within one stream", async ({
     expect,
   }) => {

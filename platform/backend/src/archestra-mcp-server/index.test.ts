@@ -5,7 +5,13 @@ import {
 } from "@shared";
 import { beforeEach, describe, expect, test } from "@/test";
 import type { Agent } from "@/types";
-import { __test, type ArchestraContext, executeArchestraTool } from ".";
+import {
+  __test,
+  type ArchestraContext,
+  archestraMcpBranding,
+  executeArchestraTool,
+  getArchestraMcpTools,
+} from ".";
 
 describe("executeArchestraTool", () => {
   let testAgent: Agent;
@@ -137,5 +143,27 @@ describe("executeArchestraTool", () => {
         );
       }
     });
+  });
+});
+
+describe("getArchestraMcpTools", () => {
+  test("rewrites built-in tool references in descriptions when branded", () => {
+    archestraMcpBranding.syncFromOrganization({
+      appName: "Acme Control Plane",
+      iconLogo: null,
+    });
+
+    const tools = getArchestraMcpTools();
+    const activateSkill = tools.find((tool) =>
+      tool.name.endsWith("__activate_skill"),
+    );
+
+    expect(activateSkill?.name).toBe("acme_control_plane__activate_skill");
+    expect(activateSkill?.description).toContain(
+      "acme_control_plane__list_skills",
+    );
+    expect(activateSkill?.description).not.toContain("Call list_skills");
+
+    archestraMcpBranding.syncFromOrganization(null);
   });
 });
