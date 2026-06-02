@@ -1,3 +1,4 @@
+import { posix } from "node:path";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { TOOL_API_SHORT_NAME } from "@shared";
 import { z } from "zod";
@@ -54,7 +55,15 @@ const registry = defineArchestraTools([
       // Restrict to the RBAC-protected API surface (plus the OpenAPI schema for
       // discovery). This deliberately excludes auth-skipping routes such as the
       // /v1/* LLM proxies, which would otherwise bypass the loopback RBAC.
-      if (args.path !== "/openapi.json" && !args.path.startsWith("/api/")) {
+      // The allowlist runs on the canonical route path, not the raw string:
+      // Fastify resolves "." / ".." (including percent-encoded forms) during
+      // routing, so a raw "/api/../v1/openai/..." would otherwise slip through.
+      const canonicalPath = canonicalRoutePath(args.path);
+      if (
+        canonicalPath === null ||
+        (canonicalPath !== "/openapi.json" &&
+          !canonicalPath.startsWith("/api/"))
+      ) {
         return errorResult("path must be /openapi.json or start with /api/.");
       }
 
@@ -87,3 +96,36 @@ const registry = defineArchestraTools([
 
 export const toolEntries = registry.toolEntries;
 export const tools = registry.tools;
+
+// === Internal helpers ===
+
+/**
+ * Resolve a user-supplied path to the route Fastify will actually dispatch, so
+ * the allowlist cannot be bypassed with traversal. Decodes percent-encoding and
+ * collapses "." / ".." segments the way the router does, and rejects a path
+ * that smuggles a query/fragment (those belong in the separate `query` arg).
+ * Returns null for anything malformed or not an absolute path.
+ */
+function canonicalRoutePath(rawPath: string): string | null {
+  if (!rawPath.startsWith("/")) {
+    return null;
+  }
+  if (rawPath.includes("?") || rawPath.includes("#")) {
+    return null;
+  }
+
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(rawPath);
+  } catch {
+    return null;
+  }
+
+  // a delimiter that only appears post-decode means it was percent-encoded to
+  // dodge the raw check above — e.g. "/api/x%3f/../../v1".
+  if (decoded.includes("?") || decoded.includes("#")) {
+    return null;
+  }
+
+  return posix.normalize(decoded);
+}

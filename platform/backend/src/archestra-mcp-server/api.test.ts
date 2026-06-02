@@ -40,4 +40,34 @@ describe("archestra__api tool", () => {
     const [content] = result.content as Array<{ type: string; text: string }>;
     expect(content.text).toContain("/api/");
   });
+
+  test("rejects traversal that resolves outside the API surface", async () => {
+    const context: ArchestraContext = {
+      agent: { id: "agent-1", name: "Test Agent" },
+      userId: "user-1",
+      organizationId: "org-1",
+    };
+
+    // Fastify normalizes these to /v1/* during routing, so the raw-string
+    // allowlist alone would let them through. The canonical-path check must not.
+    const bypassPaths = [
+      "/api/../v1/openai/chat/completions",
+      "/api/%2e%2e/v1/openai/chat/completions",
+      "/api/%2E%2E/v1/openai/chat/completions",
+      "/api/x%3f/../../v1/openai/chat/completions",
+      "/api/./../v1/openai/chat/completions",
+    ];
+
+    for (const path of bypassPaths) {
+      const result = await executeArchestraTool(
+        TOOL_API_FULL_NAME,
+        { method: "POST", path },
+        context,
+      );
+
+      expect(result.isError, `expected ${path} to be rejected`).toBe(true);
+      const [content] = result.content as Array<{ type: string; text: string }>;
+      expect(content.text).toContain("/api/");
+    }
+  });
 });
