@@ -1,5 +1,6 @@
 import {
   getArchestraToolFullName,
+  TOOL_API_FULL_NAME,
   TOOL_QUERY_KNOWLEDGE_SOURCES_SHORT_NAME,
   TOOL_WHOAMI_SHORT_NAME,
 } from "@shared";
@@ -1729,6 +1730,59 @@ describe("TrustedDataPolicyModel", () => {
       expect(result.isTrusted).toBe(true);
       expect(result.isBlocked).toBe(false);
       expect(result.reason).toBe("Built-in MCP server tool");
+    });
+
+    test("does NOT blanket-trust archestra__api — its responses are policy-governed", async () => {
+      // archestra__api dispatches to arbitrary REST routes, so unlike other
+      // built-ins it must not be auto-trusted. With no policy it falls through
+      // to the restrictive default rather than reporting "Built-in MCP server tool".
+      const result = await TrustedDataPolicyModel.evaluate(
+        agentId,
+        TOOL_API_FULL_NAME,
+        { value: { source: "external", data: "attacker-controlled" } },
+        "restrictive",
+        { teamIds: [] },
+      );
+
+      expect(result.isTrusted).toBe(false);
+      expect(result.reason).not.toBe("Built-in MCP server tool");
+    });
+
+    test("applies trusted-data policies to archestra__api like any other tool", async ({
+      makeTool,
+      makeAgentTool,
+      makeTrustedDataPolicy,
+    }) => {
+      const apiTool = await makeTool({ name: TOOL_API_FULL_NAME });
+      await makeAgentTool(agentId, apiTool.id);
+      await TrustedDataPolicyModel.deleteByToolId(apiTool.id);
+      await makeTrustedDataPolicy(apiTool.id, {
+        conditions: [{ key: "source", operator: "equal", value: "external" }],
+        action: "block_always",
+        description: "Block external API data",
+      });
+
+      const blocked = await TrustedDataPolicyModel.evaluate(
+        agentId,
+        TOOL_API_FULL_NAME,
+        { value: { source: "external", data: "attacker-controlled" } },
+        "restrictive",
+        { teamIds: [] },
+      );
+
+      expect(blocked.isBlocked).toBe(true);
+      expect(blocked.reason).toContain("Block external API data");
+
+      // whoami is still a blanket-trusted built-in
+      const whoami = await TrustedDataPolicyModel.evaluate(
+        agentId,
+        "archestra__whoami",
+        { value: { source: "external" } },
+        "restrictive",
+        { teamIds: [] },
+      );
+      expect(whoami.isTrusted).toBe(true);
+      expect(whoami.reason).toBe("Built-in MCP server tool");
     });
 
     test("does not affect evaluation of non-Archestra tools", async ({

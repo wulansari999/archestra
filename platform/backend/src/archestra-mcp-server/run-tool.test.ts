@@ -2,6 +2,7 @@
 import {
   AGENT_TOOL_PREFIX,
   slugify,
+  TOOL_API_FULL_NAME,
   TOOL_RUN_TOOL_FULL_NAME,
   TOOL_TODO_WRITE_FULL_NAME,
   TOOL_WHOAMI_FULL_NAME,
@@ -93,6 +94,40 @@ describe("run_tool", () => {
     expect(result.isError).toBe(true);
     expect((result.content[0] as any).text).toContain(
       "run_tool cannot invoke itself",
+    );
+    expect(mcpClient.executeToolCall).not.toHaveBeenCalled();
+  });
+
+  test("refuses to dispatch archestra__api by full name so its invocation policy is enforced", async () => {
+    const result = await executeArchestraTool(
+      TOOL_RUN_TOOL_FULL_NAME,
+      {
+        tool_name: TOOL_API_FULL_NAME,
+        tool_args: { method: "DELETE", path: "/api/agents/some-id" },
+      },
+      mockContext,
+    );
+
+    expect(result.isError).toBe(true);
+    expect((result.content[0] as any).text).toContain(
+      `run_tool cannot invoke ${TOOL_API_FULL_NAME}`,
+    );
+    expect(mcpClient.executeToolCall).not.toHaveBeenCalled();
+  });
+
+  test("refuses to dispatch archestra__api by short name", async () => {
+    const result = await executeArchestraTool(
+      TOOL_RUN_TOOL_FULL_NAME,
+      {
+        tool_name: "api",
+        tool_args: { method: "POST", path: "/api/agents" },
+      },
+      mockContext,
+    );
+
+    expect(result.isError).toBe(true);
+    expect((result.content[0] as any).text).toContain(
+      `cannot invoke ${TOOL_API_FULL_NAME}`,
     );
     expect(mcpClient.executeToolCall).not.toHaveBeenCalled();
   });

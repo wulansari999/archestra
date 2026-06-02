@@ -4,6 +4,7 @@ import {
   type ArchestraToolShortName,
   getArchestraToolFullName,
   isAgentTool,
+  TOOL_API_SHORT_NAME,
   TOOL_RUN_TOOL_SHORT_NAME,
   TOOL_SEARCH_TOOLS_SHORT_NAME,
 } from "@shared";
@@ -74,6 +75,22 @@ const registry = defineArchestraTools([
       );
       if (resolvedName === runToolFullName) {
         return errorResult(`${TOOL_RUN_TOOL_SHORT_NAME} cannot invoke itself`);
+      }
+
+      // archestra__api is the one built-in carved out of the policy bypass: its
+      // writes are gated by a tool-invocation policy that only fires on direct
+      // invocation. Dispatching it through run_tool (itself a bypassing built-in)
+      // would hide the nested call from the policy engine and skip the approval
+      // gate, so force the model to call it directly. Resolve via short name so
+      // a white-labeled prefix can't slip past.
+      if (
+        archestraMcpBranding.getToolShortName(resolvedName) ===
+        TOOL_API_SHORT_NAME
+      ) {
+        const apiFullName = getArchestraToolFullName(TOOL_API_SHORT_NAME);
+        return errorResult(
+          `${TOOL_RUN_TOOL_SHORT_NAME} cannot invoke ${apiFullName}; call ${apiFullName} directly so its invocation policy is enforced`,
+        );
       }
 
       if (route === "archestra") {

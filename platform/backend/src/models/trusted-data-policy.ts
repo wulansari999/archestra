@@ -422,10 +422,13 @@ class TrustedDataPolicyModel {
       return results;
     }
 
-    // Handle built-in MCP server tools
+    // Handle built-in MCP server tools. archestra__api is excluded here
+    // (bypassesToolPolicies is false for it) because it dispatches to arbitrary
+    // REST routes — its responses must be evaluated against trusted-data policies
+    // like any external tool, not blanket-trusted.
     for (let i = 0; i < toolCalls.length; i++) {
       const { toolName } = toolCalls[i];
-      if (archestraMcpBranding.isToolName(toolName)) {
+      if (archestraMcpBranding.bypassesToolPolicies(toolName)) {
         results.set(i.toString(), {
           isTrusted: true,
           isBlocked: false,
@@ -435,9 +438,9 @@ class TrustedDataPolicyModel {
       }
     }
 
-    // Get all non-built-in tool names
+    // Get all policy-governed tool names (non-built-in plus archestra__api)
     const nonArchestraToolCalls = toolCalls.filter(
-      ({ toolName }) => !archestraMcpBranding.isToolName(toolName),
+      ({ toolName }) => !archestraMcpBranding.bypassesToolPolicies(toolName),
     );
 
     if (nonArchestraToolCalls.length === 0) {
@@ -496,8 +499,9 @@ class TrustedDataPolicyModel {
     for (let i = 0; i < toolCalls.length; i++) {
       const { toolName, toolOutput } = toolCalls[i];
 
-      // Skip Archestra tools (already handled)
-      if (archestraMcpBranding.isToolName(toolName)) {
+      // Skip blanket-trusted Archestra tools (already handled); archestra__api
+      // is not blanket-trusted and falls through to policy evaluation below.
+      if (archestraMcpBranding.bypassesToolPolicies(toolName)) {
         continue;
       }
 
