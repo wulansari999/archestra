@@ -251,6 +251,46 @@ describe("restoreRenderableAssistantParts", () => {
       restoreRenderableAssistantParts({ previousMessages, nextMessages }),
     ).toBe(nextMessages);
   });
+
+  test("restores a mid-thread assistant that briefly empties even when a later assistant is renderable", () => {
+    // The placeholder guard must not suppress a genuine regression of an earlier
+    // turn: an empty assistant bounded by user turns is a real flicker to repair,
+    // not a reconnect duplicate.
+    const previousMessages = [
+      { id: "u1", role: "user", parts: [{ type: "text", text: "q1" }] },
+      {
+        id: "a1",
+        role: "assistant",
+        parts: [{ type: "text", text: "answer 1" }],
+      },
+      { id: "u2", role: "user", parts: [{ type: "text", text: "q2" }] },
+      {
+        id: "a2",
+        role: "assistant",
+        parts: [{ type: "text", text: "answer 2" }],
+      },
+    ] as UIMessage[];
+
+    const nextMessages = [
+      previousMessages[0],
+      { id: "a1", role: "assistant", parts: [{ type: "text", text: "" }] },
+      previousMessages[2],
+      previousMessages[3],
+    ] as UIMessage[];
+
+    expect(
+      restoreRenderableAssistantParts({ previousMessages, nextMessages }),
+    ).toEqual([
+      previousMessages[0],
+      {
+        id: "a1",
+        role: "assistant",
+        parts: [{ type: "text", text: "answer 1" }],
+      },
+      previousMessages[2],
+      previousMessages[3],
+    ]);
+  });
 });
 
 describe("pruneEmptyTrailingAssistantMessage", () => {

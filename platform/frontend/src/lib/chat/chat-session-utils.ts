@@ -25,14 +25,6 @@ export function restoreRenderableAssistantParts(params: {
     return restoredMessageTail;
   }
 
-  const lastRenderableAssistantIndex = nextMessages.reduce(
-    (last, message, index) =>
-      message.role === "assistant" && hasRenderableAssistantParts(message)
-        ? index
-        : last,
-    -1,
-  );
-
   let changed = false;
 
   const restoredMessages = nextMessages.map((message, index) => {
@@ -40,11 +32,16 @@ export function restoreRenderableAssistantParts(params: {
       return message;
     }
 
-    // A reconnect transiently holds an empty assistant placeholder ahead of the
-    // live assistant that carries the turn; refilling it would render the turn
-    // twice. Skip restoration when a later message is already a renderable
-    // assistant (the placeholder isn't the active tail).
-    if (index < lastRenderableAssistantIndex) {
+    // A reconnect transiently holds an empty assistant placeholder directly
+    // next to the live assistant carrying the turn; refilling it would render
+    // the turn twice. Two adjacent assistant messages only occur in that split
+    // state (normal turns alternate user/assistant), so skip restoring an empty
+    // assistant adjacent to another assistant. A historical assistant that
+    // briefly empties is bounded by user turns and still restores.
+    if (
+      nextMessages[index - 1]?.role === "assistant" ||
+      nextMessages[index + 1]?.role === "assistant"
+    ) {
       return message;
     }
 
@@ -199,7 +196,8 @@ function hasSameRenderableMessages(
     const previousMessage = previous[index];
     return (
       sameMessageIdentity(message, previousMessage) &&
-      message.parts === previousMessage?.parts
+      message.parts === previousMessage?.parts &&
+      message.metadata === previousMessage?.metadata
     );
   });
 }
