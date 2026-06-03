@@ -215,6 +215,42 @@ describe("restoreRenderableAssistantParts", () => {
       restoreRenderableAssistantParts({ previousMessages, nextMessages }),
     ).toEqual(previousMessages);
   });
+
+  test("does not refill an empty assistant placeholder that precedes a live renderable assistant", () => {
+    // A stream-resume reconnect can briefly hold an empty assistant placeholder
+    // ahead of the live assistant carrying the turn. Refilling the placeholder
+    // would render the turn twice.
+    const previousMessages = [
+      {
+        id: "user-1",
+        role: "user",
+        parts: [{ type: "text", text: "call your tool" }],
+      },
+      {
+        id: "assistant-old",
+        role: "assistant",
+        parts: [{ type: "text", text: "I called the tool successfully." }],
+      },
+    ] as UIMessage[];
+
+    const nextMessages = [
+      previousMessages[0],
+      {
+        id: "assistant-placeholder",
+        role: "assistant",
+        parts: [{ type: "text", text: "" }],
+      },
+      {
+        id: "assistant-live",
+        role: "assistant",
+        parts: [{ type: "text", text: "I called the tool successfully." }],
+      },
+    ] as UIMessage[];
+
+    expect(
+      restoreRenderableAssistantParts({ previousMessages, nextMessages }),
+    ).toBe(nextMessages);
+  });
 });
 
 describe("pruneEmptyTrailingAssistantMessage", () => {
