@@ -9,6 +9,7 @@ import {
   TOOL_SEARCH_TOOLS_SHORT_NAME,
 } from "@shared";
 import { z } from "zod";
+import { evaluateSingleMcpToolInvocationPolicy } from "@/guardrails/tool-invocation";
 import logger from "@/logging";
 import { archestraMcpBranding } from "./branding";
 import {
@@ -107,6 +108,19 @@ const registry = defineArchestraTools([
         );
       }
 
+      const toolInput = args.tool_args ?? {};
+      const policyBlock = await evaluateSingleMcpToolInvocationPolicy({
+        agentId: context.agentId,
+        toolName: resolvedName,
+        toolInput,
+        organizationId: context.organizationId,
+        contextIsTrusted: context.contextIsTrusted ?? true,
+        enforceApprovalRequired: !context.approvalRequiredPoliciesHandled,
+      });
+      if (policyBlock) {
+        return errorResult(policyBlock.refusalMessage);
+      }
+
       const { default: mcpClient } = await import("@/clients/mcp-client");
       const toolCallId = `run-tool-${Date.now()}-${Math.random()
         .toString(36)
@@ -115,7 +129,7 @@ const registry = defineArchestraTools([
         {
           id: toolCallId,
           name: resolvedName,
-          arguments: args.tool_args,
+          arguments: toolInput,
         },
         context.agentId,
         context.tokenAuth,

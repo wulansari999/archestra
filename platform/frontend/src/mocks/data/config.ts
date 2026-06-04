@@ -19,7 +19,6 @@ export function makeConfig(
     features: {
       orchestratorK8sRuntime: false,
       codeRuntime: false,
-      advancedToolFeaturesEnabled: false,
       agentSkillsEnabled: false,
       byosEnabled: false,
       byosVaultKvVersion: "1",
@@ -55,6 +54,7 @@ export function makePublicConfig(
     disableInvitations: false,
     analytics: {
       enabled: false,
+      instanceId: null,
       posthog: { key: "", host: "" },
     },
     ...overrides,

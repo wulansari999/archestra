@@ -6,7 +6,6 @@ import {
   type EnvironmentList,
   type UpdateEnvironment,
 } from "@/types";
-import { assertNetworkPolicyBelongsToOrganization } from "./network-policy";
 
 // === Public API ===
 
@@ -29,16 +28,12 @@ export async function createEnvironment(params: {
   if (existing.some((e) => e.name === data.name)) {
     throw new ApiError(409, "An environment with this name already exists.");
   }
-  await assertNetworkPolicyBelongsToOrganization({
-    networkPolicyId: data.networkPolicyId,
-    organizationId,
-  });
   return EnvironmentModel.create({
     organizationId,
     name: data.name,
     description: data.description ?? null,
     namespace: data.namespace ?? null,
-    networkPolicyId: data.networkPolicyId ?? null,
+    networkPolicy: data.networkPolicy ?? null,
     restricted: data.restricted,
   });
 }
@@ -56,20 +51,13 @@ export async function updateEnvironment(params: {
       throw new ApiError(409, "An environment with this name already exists.");
     }
   }
-  if (data.networkPolicyId !== undefined) {
-    await assertNetworkPolicyBelongsToOrganization({
-      networkPolicyId: data.networkPolicyId,
-      organizationId,
-    });
-  }
-
   const updated = await EnvironmentModel.update({
     id,
     organizationId,
     name: data.name,
     description: data.description,
     namespace: data.namespace,
-    networkPolicyId: data.networkPolicyId,
+    networkPolicy: data.networkPolicy,
     restricted: data.restricted,
   });
   if (!updated) {
@@ -81,22 +69,23 @@ export async function updateEnvironment(params: {
 /**
  * Gate assigning a catalog item to an environment. Unrestricted environments
  * are open; a `restricted` environment requires the caller to hold
- * `environment:admin`. The default (null) environment is open unless the org
- * has marked its default environment restricted, in which case it is gated the
- * same way. Callers compute `hasEnvironmentAdmin` with their own auth primitive
- * (route headers vs. MCP user context) and pass the result in, so this stays
- * free of HTTP concerns.
+ * `environment:deploy-to-restricted` (or `environment:admin`, which implies it).
+ * The default (null) environment is open unless the org has marked its default
+ * environment restricted, in which case it is gated the same way. Callers
+ * compute `canDeployToRestricted` with their own auth primitive (route headers
+ * vs. MCP user context) and pass the result in, so this stays free of HTTP
+ * concerns.
  */
 export async function assertCanAssignEnvironment(params: {
   environmentId: string | null | undefined;
   organizationId: string;
-  hasEnvironmentAdmin: boolean;
+  canDeployToRestricted: boolean;
 }): Promise<void> {
-  const { environmentId, organizationId, hasEnvironmentAdmin } = params;
+  const { environmentId, organizationId, canDeployToRestricted } = params;
 
   if (!environmentId) {
     const organization = await OrganizationModel.getById(organizationId);
-    if (organization?.defaultEnvironmentRestricted && !hasEnvironmentAdmin) {
+    if (organization?.defaultEnvironmentRestricted && !canDeployToRestricted) {
       throw new ApiError(
         403,
         "You do not have permission to assign catalog items to the default environment.",
@@ -112,7 +101,7 @@ export async function assertCanAssignEnvironment(params: {
   if (!environment) {
     throw new ApiError(404, "Environment not found");
   }
-  if (environment.restricted && !hasEnvironmentAdmin) {
+  if (environment.restricted && !canDeployToRestricted) {
     throw new ApiError(
       403,
       "You do not have permission to assign catalog items to this restricted environment.",

@@ -100,13 +100,25 @@ bounded by that user's permissions.
 
 The tool takes \`{ method, path, query?, body? }\` and issues that request against
 Archestra's API.
+- \`path\` must start with \`/api/\` (or be \`/openapi.json\`); the only non-\`/api\`
+  routes — the \`/v1/*\` proxies — are intentionally unreachable here.
+- \`query\` is an object of **string-valued** parameters (numbers and booleans go
+  in as strings). Put filters, sorting, and pagination here — never hand-build a
+  \`?a=b\` query string into \`path\`.
+- \`body\` is the JSON payload for write methods.
+- Each response comes back as \`HTTP <status>\` followed by the JSON body. Read the
+  status: \`2xx\` succeeded; \`>= 400\` is an error and the body explains why — act on
+  that message rather than blindly retrying.
 
 1. **Discover the surface.** Call \`archestra__api\` with
    \`{ method: "GET", path: "/openapi.json" }\` and read the paths, parameters, and
    request/response schemas. The spec is the source of truth — consult it for
    exact endpoints and field names rather than guessing.
 2. **Read before you write.** GET the current state (for example \`/api/agents\`,
-   \`/api/mcp_server\`, \`/api/tools\`) before creating or editing.
+   \`/api/mcp_server\`, \`/api/tools\`) before creating or editing. List endpoints are
+   paginated — pass the page/limit query parameters the schema defines and follow
+   the pagination metadata in the response rather than assuming the first page is
+   everything.
 3. **Write.** \`POST\`/\`PUT\`/\`PATCH\`/\`DELETE\` perform changes. They require human
    approval by default and are blocked in autonomous sessions (API, A2A,
    subagents) where no human is present — surface the pending action to the user
