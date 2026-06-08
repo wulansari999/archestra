@@ -51,11 +51,8 @@ class MessageModel {
     );
   }
 
-  static async findByConversation(
-    conversationId: string,
-    executor: DbExecutor = db,
-  ): Promise<Message[]> {
-    const messages = await executor
+  static async findByConversation(conversationId: string): Promise<Message[]> {
+    const messages = await db
       .select()
       .from(schema.messagesTable)
       .where(eq(schema.messagesTable.conversationId, conversationId))
@@ -166,7 +163,6 @@ class MessageModel {
   static async updateContent(
     messageId: string,
     content: Message["content"],
-    executor: DbExecutor = db,
   ): Promise<Message> {
     // Validate the row exists so the return type holds — `.returning()`
     // would otherwise yield `undefined` for an unknown id.
@@ -175,7 +171,7 @@ class MessageModel {
       throw new Error("Message not found");
     }
 
-    const [updatedMessage] = await executor
+    const [updatedMessage] = await db
       .update(schema.messagesTable)
       .set({
         content,
