@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "//dev": "Auto-selects the Next dev bundler in scripts/dev.mjs: Turbopack on Linux/CI/Intel-Mac (2-6x faster compiles), webpack on macOS arm64 to dodge the unfixed @next/swc-darwin-arm64 IOAccelerator (Apple GPU) memory leak under Turbopack (vercel/next.js#92055). Override with ARCHESTRA_DEV_BUNDLER=turbopack|webpack, or use dev:turbo / dev:webpack.",
+    "//dev": "Auto-selects the Next dev bundler in scripts/dev.mjs: Turbopack on Linux/CI/Intel-Mac (2-6x faster compiles), webpack on macOS arm64 to dodge the unfixed @next/swc-darwin-arm64 IOAccelerator-tagged mimalloc memory growth under Turbopack (vercel/next.js#92055; not GPU memory, see docs/turbopack-arm64-memory-findings.md). Override with ARCHESTRA_DEV_BUNDLER=turbopack|webpack, or use dev:turbo / dev:webpack.",
     "dev": "node ./scripts/dev.mjs",
     "dev:webpack": "next dev --webpack -H 127.0.0.1",
     "dev:profile": "next dev --webpack --experimental-cpu-prof -H 127.0.0.1",

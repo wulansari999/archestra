@@ -56,6 +56,14 @@ const nextConfig: NextConfig = {
     // the backend's runtime value.) Anything the proxy lets through still gets
     // sized-checked by the backend's bodyLimit, which is the authoritative cap.
     proxyClientMaxBodySize: "200mb",
+    // Turbopack's dev filesystem cache balloons @next/swc-darwin-arm64 resident
+    // memory on Apple Silicon (vercel/next.js#92055); disabling it cuts the working
+    // set ~3.5x. Webpack (the macOS arm64 dev default in scripts/dev.mjs) ignores
+    // this flag, so it only trims the Turbopack opt-in path. See
+    // docs/turbopack-arm64-memory-findings.md.
+    ...(process.platform === "darwin" && process.arch === "arm64"
+      ? { turbopackFileSystemCacheForDev: false }
+      : {}),
   },
   httpAgentOptions: {
     keepAlive: true,

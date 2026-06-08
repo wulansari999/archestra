@@ -7,11 +7,14 @@ import { pathToFileURL } from "node:url";
 const VALID = new Set(["turbopack", "webpack"]);
 
 /**
- * Choose the Next.js dev bundler. Turbopack compiles 2-6x faster, but
- * @next/swc-darwin-arm64 leaks multi-GB non-reclaimable IOAccelerator (Apple
- * GPU) memory under Turbopack on Apple Silicon (vercel/next.js#92055, still
- * open), so macOS arm64 stays on webpack until the upstream native fix ships.
- * Set ARCHESTRA_DEV_BUNDLER=turbopack|webpack to override.
+ * Choose the Next.js dev bundler. Turbopack compiles 2-6x faster, but on Apple
+ * Silicon @next/swc-darwin-arm64 grows multi-GB of non-reclaimable, IOAccelerator-
+ * tagged mimalloc memory during compilation that never recovers on idle (~13GB
+ * phys_footprint for this app), so macOS arm64 stays on webpack until the upstream
+ * fix ships (vercel/next.js#92055, still open; the IOAccelerator tag is a kernel
+ * label on the allocator's anonymous mmaps, not GPU memory). No env/allocator knob
+ * bounds it and 16.3.0-canary.45 only halves it — see
+ * docs/turbopack-arm64-memory-findings.md. Override with ARCHESTRA_DEV_BUNDLER=turbopack|webpack.
  */
 export function pickBundler({ override, platform, arch }) {
   if (override) {
