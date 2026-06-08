@@ -2162,13 +2162,10 @@ export function ChatPageContent({
                       onUserMessageEdit={(editedMessage, updatedMessages) => {
                         if (setMessages && regenerate) {
                           userMessageJustEdited.current = true;
-                          // Keep the edited user message (its text is already
-                          // persisted by the non-destructive PATCH) and
-                          // regenerate from it. regenerate() re-requests with
-                          // trigger "regenerate-message"; the server truncates
-                          // the stale turn and writes the new one atomically.
-                          // We never append a new user message, so the user
-                          // turn is not duplicated.
+                          // Keep the user message and regenerate from it. Using
+                          // regenerate() (not a fresh sendMessage) avoids
+                          // duplicating the turn and signals the server to
+                          // replace the stale turn atomically.
                           setMessages(updatedMessages);
                           void regenerate({ messageId: editedMessage.id });
                         }
