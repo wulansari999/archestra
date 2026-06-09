@@ -301,7 +301,7 @@ function ExpandedToolCard({
         actionButton={logsButton}
       />
       <ToolContent>
-        {hasInput ? <ToolInput input={part.input} /> : null}
+        {hasInput ? <ToolInput input={part.input} defaultOpen /> : null}
         {isApprovalRequested &&
           onToolApprovalResponse &&
           "approval" in part &&
