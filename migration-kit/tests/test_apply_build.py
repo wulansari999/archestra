@@ -88,8 +88,8 @@ def test_team_scoped_skill_carries_team_ids(index: dict[str, Item]) -> None:
     assert built.payload.teamIds == ["team-a", "team-b"]
 
 
-def test_local_tool_builds_shared_toolset_skill(index: dict[str, Item]) -> None:
-    _, built = _decide(index, "local_tool:sample-setup-tools", "skill")
+def test_local_toolset_builds_shared_skill(index: dict[str, Item]) -> None:
+    _, built = _decide(index, "local_toolset:sample-setup-tools", "skill")
     assert isinstance(built, BuiltSkill)
     assert "- `tools/word_count.py`" in built.payload.content
     assert "python3 /skills/sample-setup-tools/" in built.payload.content
@@ -98,6 +98,25 @@ def test_local_tool_builds_shared_toolset_skill(index: dict[str, Item]) -> None:
         "tools/word_count.py",
         "requirements.txt",
     }
+
+
+def test_per_tool_item_builds_standalone_skill(index: dict[str, Item]) -> None:
+    _, built = _decide(index, "local_tool:word_count", "skill")
+    assert isinstance(built, BuiltSkill)
+    assert "python3 /skills/word_count/" in built.payload.content
+    assert {f.path for f in built.payload.files} == {
+        "tools/word_count.py",
+        "requirements.txt",
+    }
+
+
+def test_instruction_file_builds_skill(index: dict[str, Item]) -> None:
+    _, built = _decide(index, "claude_md:AGENTS.md", "skill")
+    assert isinstance(built, BuiltSkill)
+    assert built.payload.content.startswith("---")
+    assert '"AGENTS"' in built.payload.content
+    assert "cross-vendor agent instructions" in built.payload.content
+    assert "Always write tests" in built.payload.content
 
 
 def test_remote_mcp_builds_remote_catalog(index: dict[str, Item]) -> None:

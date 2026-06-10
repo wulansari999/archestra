@@ -204,6 +204,37 @@ def discover(root: Path) -> Inventory:
             mark(cm)
             break
 
+    # 1b. instruction files from other ecosystems -> agent prompt material or
+    # skills. AGENTS.md is the cross-vendor convention; Cursor and Copilot
+    # rules are markdown instructions too. The mapping step decides whether to
+    # fold each into the primary agent's system prompt or keep it as a skill.
+    instruction_files = [
+        p for p in (
+            root / "AGENTS.md",
+            root / ".cursorrules",
+            root / ".github" / "copilot-instructions.md",
+        )
+        if _is_contained_file(p, root)
+    ] + [
+        p for p in sorted((root / ".cursor" / "rules").glob("*"))
+        if _is_contained_file(p, root) and p.suffix in (".md", ".mdc")
+    ]
+    for f in instruction_files:
+        doc = parse_frontmatter(read(f))
+        rel = f.relative_to(root).as_posix()
+        note_unparsed(doc.unparsed_lines, rel)
+        _warn_if_secret(doc.body, rel, inv.warnings)
+        name = f.stem.lstrip(".") or f.name.lstrip(".")
+        inv.items.append(ClaudeMdItem(
+            id=f"claude_md:{rel}", name=name, path=rel,
+            summary=(
+                "agent instructions (non-Claude-Code convention) -> fold into the "
+                "primary agent prompt or keep as a skill"
+            ),
+            data=ClaudeMdData(body=doc.body, frontmatter=doc.frontmatter),
+        ))
+        mark(f)
+
     # 2. subagents -> skills (preferred)
     for f in sorted((root / ".claude" / "agents").glob("*.md")):
         if not _is_contained_file(f, root):
@@ -265,54 +296,78 @@ def discover(root: Path) -> Inventory:
         ))
         mark(f)
 
-    # 5. local python tools -> ONE shared toolset skill (best-effort). heuristic:
-    # *.py at the top of a tools/ dir are the entrypoints. a single skill (not
-    # one per script) so every skill/instruction that references a tool reuses
-    # the same mounted toolset.
+    # 5. local python tools (best-effort). heuristic: *.py at the top of a
+    # tools/ dir are runnable tools. discovery stays granular — one item per
+    # script — and ALSO emits one shared "<project>-tools" toolset item
+    # bundling the whole tools/ tree, so the mapping step chooses the shape
+    # (default: the toolset; see entity-mapping.md). Migrate one shape, never
+    # both — they bundle the same scripts.
     tools_dir = root / "tools"
-    entrypoints = [
-        f.relative_to(root).as_posix()
-        for f in sorted(tools_dir.glob("*.py"))
+    tool_scripts = [
+        f for f in sorted(tools_dir.glob("*.py"))
         if _is_contained_file(f, root) and f.name != "__init__.py"
     ]
-    if entrypoints:
-        # the tools' requirements move to the generated skill root, where
-        # Archestra auto-installs them when the skill is mounted into a sandbox
-        reqs = next(
-            (p for p in (tools_dir / "requirements.txt", root / "requirements.txt")
-             if _is_contained_file(p, root)),
-            None,
-        )
+    if tool_scripts:
+        # the tools' own requirements are re-rooted to each generated skill's
+        # root, where Archestra auto-installs them on mount. a root-level
+        # requirements.txt is deliberately NOT attached — it usually pins the
+        # whole project, not the tools.
+        reqs = tools_dir / "requirements.txt"
+        bundled_reqs: BundledFile | None = None
+        if _is_contained_file(reqs, root):
+            raw_reqs = _read_bundled(reqs, root)
+            # requirements files commonly embed index credentials
+            # (--extra-index-url https://user:token@...), so warn like any bundle
+            _warn_if_secret(raw_reqs.content, raw_reqs.path, inv.warnings)
+            bundled_reqs = replace(raw_reqs, path="requirements.txt")
+            mark(reqs)
+        elif _is_contained_file(root / "requirements.txt", root):
+            inv.warnings.append(
+                "tools/ has no requirements.txt; the root requirements.txt was NOT "
+                "attached to the generated tool skill(s) — it usually pins the whole "
+                "project. If the tools need third-party imports, copy the relevant "
+                "pins into tools/requirements.txt and re-run discovery."
+            )
+
+        # granular items: one per script, for plans that migrate independent
+        # single-file tools separately
+        for f in tool_scripts:
+            bundled = _read_bundled(f, root)
+            entry = bundled.path
+            files = [bundled] + ([bundled_reqs] if bundled_reqs is not None else [])
+            inv.items.append(LocalToolItem(
+                id=f"local_tool:{f.stem}", name=f.stem, path=entry,
+                summary=f"local python tool {f.name}; member of the shared toolset item",
+                data=LocalToolData(entrypoints=[entry]), files=files,
+            ))
+            mark(f)
+
+        # the shared toolset item: the whole tools/ tree (data files and
+        # submodules included), every top-level script as an entrypoint.
+        # containment is checked against tools/ itself (not the repo root) so a
+        # symlink can't pull arbitrary repo files (e.g. ../.env) into the
+        # inventory.
         bundles: list[BundledFile] = []
-        # bundle the whole tools/ tree, not just the entrypoints: tools often
-        # read sibling data/config files and import submodules. containment is
-        # checked against tools/ itself (not the repo root) so a symlink can't
-        # pull arbitrary repo files (e.g. ../.env) into the inventory
         for f in sorted(tools_dir.rglob("*")):
             if not _is_contained_file(f, tools_dir) or f == reqs:
                 continue
             rel_parts = f.relative_to(tools_dir).parts
             if any(p.startswith(".") or p == "__pycache__" for p in rel_parts) or f.suffix == ".pyc":
                 continue
-            bundled = _read_bundled(f, root)
-            if bundled.encoding == "utf8":
-                _warn_if_secret(bundled.content, bundled.path, inv.warnings)
-            bundles.append(bundled)
+            tree_file = _read_bundled(f, root)
+            if tree_file.encoding == "utf8":
+                _warn_if_secret(tree_file.content, tree_file.path, inv.warnings)
+            bundles.append(tree_file)
             mark(f)
-        if reqs is not None:
-            bundled_reqs = _read_bundled(reqs, root)
-            # requirements files commonly embed index credentials
-            # (--extra-index-url https://user:token@...), so warn like any bundle
-            _warn_if_secret(bundled_reqs.content, bundled_reqs.path, inv.warnings)
-            bundles.append(replace(bundled_reqs, path="requirements.txt"))
-            mark(reqs)
+        if bundled_reqs is not None:
+            bundles.append(bundled_reqs)
         name = _toolset_name(root)
-        reqs_note = f", deps from {reqs.relative_to(root).as_posix()}" if reqs is not None else ""
+        entrypoints = [f.relative_to(root).as_posix() for f in tool_scripts]
         inv.items.append(LocalToolItem(
-            id=f"local_tool:{name}", name=name, path="tools",
+            id=f"local_toolset:{name}", name=name, path="tools",
             summary=(
-                f"shared toolset skill bundling tools/ "
-                f"({len(entrypoints)} entrypoint script(s)){reqs_note}"
+                f"shared toolset skill bundling tools/ ({len(entrypoints)} entrypoint "
+                "script(s)); alternative to the per-tool items — migrate one shape, not both"
             ),
             data=LocalToolData(entrypoints=entrypoints), files=bundles,
         ))
@@ -364,6 +419,14 @@ def discover(root: Path) -> Inventory:
         for p in sorted(claude_dir.rglob("*")):
             if p.is_file() and p.resolve() not in seen:
                 inv.unknowns.append(p.relative_to(root).as_posix())
+
+    # 8b. well-known agentic artifacts from other ecosystems we don't parse —
+    # surface them so the report can flag manual follow-up instead of staying
+    # silent about a setup we only partially understood
+    for known in (".windsurfrules", ".clinerules", "GEMINI.md", ".goosehints"):
+        p = root / known
+        if _is_contained_file(p, root) and p.resolve() not in seen:
+            inv.unknowns.append(f"{known} (recognized agent-config artifact; not auto-migrated)")
 
     return inv
 

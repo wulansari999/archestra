@@ -168,6 +168,14 @@ def _skill_content_for(item: Item, name: str) -> tuple[str, list[SkillFile]]:
         case SkillItem():
             # verbatim: the original SKILL.md already carries frontmatter.
             return item.data.content, files
+        case ClaudeMdItem():
+            # an instruction file (AGENTS.md, Cursor/Copilot rules) kept as a
+            # standalone skill instead of being folded into the agent prompt
+            desc = (
+                _fm_str(item.data.frontmatter, "description")
+                or f"migrated agent instructions from {item.path}"
+            ).replace("\n", " ")
+            return emit_frontmatter(name, desc) + item.data.body, files
         case SubagentItem():
             desc = (item.data.description or f"migrated subagent {name}").replace("\n", " ")
             note = ""

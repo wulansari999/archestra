@@ -7,10 +7,12 @@ This is the canonical mapping the model applies when turning `inventory.json` in
 | Source (inventory `kind`) | `target_kind` | Confidence | Notes |
 |---|---|---|---|
 | `claude_md` (root CLAUDE.md) | `agent` | clean | becomes the **primary agent**'s systemPrompt; one per setup, no model binding (inherits org default) |
+| `claude_md:*` (AGENTS.md, `.cursorrules`, `.cursor/rules/*`, copilot-instructions.md) | `skill` or fold into the primary `agent` | best-effort | other-ecosystem instruction files; fold short global rules into the agent prompt (manual edit of the `claude_md` decision body), keep self-contained ones as skills |
 | `skill` (`.claude/skills/*/SKILL.md`) | `skill` | clean | migrated verbatim with bundled files |
 | `subagent` (`.claude/agents/*.md`) | `skill` (preferred) or `agent` | best-effort | default to skill; tool allowlist is **documented, not enforced** |
 | `command` (`.claude/commands/*.md`) | `skill` | best-effort | slash command body → skill |
-| `local_tool` (all `tools/*.py`) | `skill` | best-effort | ONE shared toolset skill bundles every script plus `requirements.txt`; see cross-references below |
+| `local_toolset:*` (whole `tools/` tree) | `skill` | best-effort | DEFAULT for local tools: one shared skill bundling every script, sibling data files, and `tools/requirements.txt`; see cross-references below |
+| `local_tool:*` (one `tools/*.py`) | `skill` | best-effort | per-script alternative for independent single-file tools; bundles the script + `tools/requirements.txt` only (no sibling data files) |
 | `mcp_server` (remote, has `url`) | `mcp_catalog` (+ optional `mcp_install`) | clean | remote catalog item |
 | `mcp_server` (stdio, has `command`) | `mcp_catalog` (+ optional `mcp_install`) | best-effort | local catalog item; install spins a K8s pod |
 | `hook` (intent `guard`) | `tool_policy` | best-effort, conditional | only if the guarded tool maps to a real Archestra tool — see below |
@@ -74,14 +76,26 @@ Redirect, don't translate:
 Telemetry is **instance-level env config** — no API, no per-agent knob. To keep an existing
 Grafana/collector, the pilot owner sets `ARCHESTRA_OTEL_EXPORTER_OTLP_ENDPOINT` on the instance.
 
-## Local-tool cross-references (check before mapping)
-Discovery emits a single shared toolset skill (`<project>-tools`) covering all `tools/*.py` and the
-nearest `requirements.txt`. Other migrated skills/commands/subagents that tell the agent to run
-`tools/<x>.py` keep that prose, but after migration the script lives in the toolset skill, not next
-to them. For each such reference, ask the user whether to rewrite the body during mapping (preferred:
-"activate the `<project>-tools` skill and run `python3 /skills/<project>-tools/tools/<x>.py`") or
-leave it and list it in the report as a manual follow-up. Don't silently leave dangling references —
-they fail with file-not-found at runtime.
+## Local tools: pick ONE shape, then fix cross-references
+Discovery emits the same `tools/` scripts in two shapes: one `local_toolset:*` item (the whole tree
+as a single `<project>-tools` skill) and one `local_tool:*` item per script. **Migrate exactly one
+shape and `skip` the other** — migrating both uploads duplicate copies of every script. Default to
+the toolset: it keeps sibling data files and submodules together and gives referencing skills one
+thing to activate. Split into per-tool skills only when the scripts are genuinely independent
+single-file tools and per-tool catalog discoverability matters more (note: per-tool items do NOT
+carry sibling data files — a tool that reads `tools/config.json` must go through the toolset).
+
+If the tools import third-party packages but discovery warned that no `tools/requirements.txt`
+exists, resolve that before applying: copy the relevant pins from the root `requirements.txt` into
+`tools/requirements.txt` and re-run discovery (the root file is never attached automatically — it
+usually pins the whole project).
+
+Other migrated skills/commands/subagents that tell the agent to run `tools/<x>.py` keep that prose,
+but after migration the script lives inside a skill mount, not next to them. For each such
+reference, ask the user whether to rewrite the body during mapping (preferred: "activate the
+`<project>-tools` skill and run `python3 /skills/<project>-tools/tools/<x>.py`") or leave it and
+list it in the report as a manual follow-up. Don't silently leave dangling references — they fail
+with file-not-found at runtime.
 
 The toolset name defaults to `<project>-tools`. `apply.py` treats an existing skill with the same
 name/scope as already-migrated and skips it — so if an unrelated skill already holds that name, set

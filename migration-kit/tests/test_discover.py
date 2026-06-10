@@ -72,16 +72,36 @@ def test_command_discovered(inv: Inventory) -> None:
     assert isinstance(_by_id(inv, "command:greet"), CommandItem)
 
 
-def test_local_tools_become_one_shared_toolset(inv: Inventory) -> None:
-    item = _by_id(inv, "local_tool:sample-setup-tools")
-    assert isinstance(item, LocalToolItem)
-    assert item.name == "sample-setup-tools"
-    assert item.data.entrypoints == ["tools/word_count.py"]
-    by_path = {f.path: f for f in item.files}
+def test_local_tools_emit_toolset_and_granular_items(inv: Inventory) -> None:
+    toolset = _by_id(inv, "local_toolset:sample-setup-tools")
+    assert isinstance(toolset, LocalToolItem)
+    assert toolset.name == "sample-setup-tools"
+    assert toolset.data.entrypoints == ["tools/word_count.py"]
+    by_path = {f.path: f for f in toolset.files}
     # tools/requirements.txt is re-rooted so Archestra auto-installs it on mount
     assert set(by_path) == {"tools/word_count.py", "requirements.txt"}
     assert "def main" in by_path["tools/word_count.py"].content
     assert by_path["requirements.txt"].content == "mpmath\n"
+
+    per_tool = _by_id(inv, "local_tool:word_count")
+    assert isinstance(per_tool, LocalToolItem)
+    assert per_tool.data.entrypoints == ["tools/word_count.py"]
+    assert {f.path for f in per_tool.files} == {"tools/word_count.py", "requirements.txt"}
+
+
+def test_other_ecosystem_instruction_files_discovered(inv: Inventory) -> None:
+    agents = _by_id(inv, "claude_md:AGENTS.md")
+    assert isinstance(agents, ClaudeMdItem)
+    assert agents.name == "AGENTS"
+    assert "Always write tests" in agents.data.body
+    cursor = _by_id(inv, "claude_md:.cursorrules")
+    assert isinstance(cursor, ClaudeMdItem)
+    assert cursor.name == "cursorrules"
+    assert "functional style" in cursor.data.body
+
+
+def test_known_foreign_artifacts_surface_in_unknowns(inv: Inventory) -> None:
+    assert any(u.startswith(".windsurfrules (recognized") for u in inv.unknowns)
 
 
 def test_mcp_stdio_and_remote(inv: Inventory) -> None:
