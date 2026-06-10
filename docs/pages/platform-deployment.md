@@ -823,8 +823,8 @@ The following environment variables can be used to configure Archestra Platform.
   - Default: `false`
   - Values: `true`, `false`
 
-- **`ARCHESTRA_LLM_SMART_ROUTER_ENABLED`** - Enables the LLM Smart Router — per-request routing between an everyday and a premium model by predicted difficulty (Cost / Balanced / Quality modes), selectable per conversation in Chat. When off, the Smart Router tab is hidden and routing never engages, even for conversations that already reference a router.
-  - Default: `true`
+- **`ARCHESTRA_LLM_SMART_ROUTER_ENABLED`** - Enables the LLM Smart Router — per-request routing between an everyday and a premium model by predicted difficulty (Cost / Balanced / Quality modes), selectable per conversation in Chat. Off by default; when off, the Smart Router tab is hidden and routing never engages, even for conversations that already reference a router.
+  - Default: `false`
   - Values: `true`, `false`
 
 - **`ARCHESTRA_AGENT_HOOKS_ENABLED`** - Enables agent lifecycle hooks — user-defined scripts that run at chat lifecycle events (and the admin-only `/debug` chip mode in chat). Only takes effect when the agent runtime is also on (`ARCHESTRA_CODE_RUNTIME_ENABLED=true`), since hooks execute in the per-conversation sandbox. When off, the per-agent hooks editor is hidden and no hooks run.
