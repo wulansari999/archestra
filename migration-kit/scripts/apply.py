@@ -184,14 +184,30 @@ def _skill_content_for(item: Item, name: str) -> tuple[str, list[SkillFile]]:
             desc = (_fm_str(item.data.frontmatter, "description") or f"migrated command {name}").replace("\n", " ")
             return emit_frontmatter(name, desc) + item.data.body, files
         case LocalToolItem():
-            entry = item.data.entrypoint
+            entries = item.data.entrypoints
+            has_reqs = any(f.path == "requirements.txt" for f in files)
+            listing = "\n".join(f"- `{e}`" for e in entries)
+            stems = ", ".join(Path(e).stem for e in entries)
             body = (
-                f"# {name}\n\nThis skill wraps the local python tool `{entry}`, bundled below.\n\n"
-                "## Usage\nAfter activating this skill, run the bundled script in the skill sandbox:\n"
-                f"```bash\npython3 {entry}\n```\n"
-                f"Use `run_command` with `cwd` set to `/skills/{name}` when sandbox tools are available.\n"
+                f"# {name}\n\nShared toolset skill: bundles the project's local python tools "
+                "so any skill or instruction that references one of them reuses this single "
+                "skill instead of a copy per tool.\n\n"
+                f"## Bundled tools\n{listing}\n\n"
+                "## Usage\nActivate this skill, then run a tool in the skill sandbox:\n"
+                f"```bash\npython3 /skills/{name}/<tool path> [args...]\n```\n"
+                f"Pass `cwd: /skills/{name}` to `run_command` only when a tool reads bundled "
+                "files by relative path; write outputs to absolute paths under `/home/sandbox` "
+                "so they stay visible to the session and `download_file`.\n"
             )
-            return emit_frontmatter(name, f"Run the bundled {entry} script.") + body, files
+            if has_reqs:
+                body += (
+                    "\nPython dependencies are bundled in `requirements.txt` and install "
+                    "automatically when the skill is mounted.\n"
+                )
+            desc = f"Shared toolset: run the bundled scripts ({stems})."
+            if len(desc) > 200:
+                desc = f"Shared toolset: run the project's {len(entries)} bundled python tools."
+            return emit_frontmatter(name, desc) + body, files
         case _:
             raise ContractError(f"cannot build skill content from item kind {item.kind}")
 

@@ -72,12 +72,16 @@ def test_command_discovered(inv: Inventory) -> None:
     assert isinstance(_by_id(inv, "command:greet"), CommandItem)
 
 
-def test_local_tool_bundles_script(inv: Inventory) -> None:
-    item = _by_id(inv, "local_tool:word_count")
+def test_local_tools_become_one_shared_toolset(inv: Inventory) -> None:
+    item = _by_id(inv, "local_tool:sample-setup-tools")
     assert isinstance(item, LocalToolItem)
-    assert item.data.entrypoint == "tools/word_count.py"
-    assert item.files[0].path == "tools/word_count.py"
-    assert "def main" in item.files[0].content
+    assert item.name == "sample-setup-tools"
+    assert item.data.entrypoints == ["tools/word_count.py"]
+    by_path = {f.path: f for f in item.files}
+    # tools/requirements.txt is re-rooted so Archestra auto-installs it on mount
+    assert set(by_path) == {"tools/word_count.py", "requirements.txt"}
+    assert "def main" in by_path["tools/word_count.py"].content
+    assert by_path["requirements.txt"].content == "mpmath\n"
 
 
 def test_mcp_stdio_and_remote(inv: Inventory) -> None:

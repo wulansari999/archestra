@@ -24,6 +24,7 @@ import os
 import re
 import sys
 from collections import Counter
+from dataclasses import replace
 from pathlib import Path
 
 from contracts import SECRET_KEY_RE as _SECRET_KEY
@@ -144,6 +145,13 @@ def _read_bundled(path: Path, rel_to: Path) -> BundledFile:
         return BundledFile(path=rel, content=base64.b64encode(raw).decode("ascii"), encoding="base64")
 
 
+def _toolset_name(root: Path) -> str:
+    """skill name for the shared toolset: '<project>-tools', kebab-cased so it is
+    valid as an org-unique Archestra skill name."""
+    base = re.sub(r"[^a-z0-9]+", "-", root.resolve().name.lower()).strip("-") or "project"
+    return f"{base}-tools"
+
+
 def _classify_hook(event: str, command: str) -> HookIntent:
     """advisory intent hint for the model: a deterministic guard vs passive logging. the guard
     logic often lives in a referenced script we don't read, so this is a HINT -- the model must
@@ -257,20 +265,57 @@ def discover(root: Path) -> Inventory:
         ))
         mark(f)
 
-    # 5. local python tools -> skills (best-effort). heuristic: *.py under a tools/ dir.
-    for f in sorted((root / "tools").glob("*.py")):
-        if not _is_contained_file(f, root):
-            continue
-        bundled = _read_bundled(f, root)
-        if bundled.encoding == "utf8":
-            _warn_if_secret(bundled.content, bundled.path, inv.warnings)
-        entry = f.relative_to(root).as_posix()
+    # 5. local python tools -> ONE shared toolset skill (best-effort). heuristic:
+    # *.py at the top of a tools/ dir are the entrypoints. a single skill (not
+    # one per script) so every skill/instruction that references a tool reuses
+    # the same mounted toolset.
+    tools_dir = root / "tools"
+    entrypoints = [
+        f.relative_to(root).as_posix()
+        for f in sorted(tools_dir.glob("*.py"))
+        if _is_contained_file(f, root) and f.name != "__init__.py"
+    ]
+    if entrypoints:
+        # the tools' requirements move to the generated skill root, where
+        # Archestra auto-installs them when the skill is mounted into a sandbox
+        reqs = next(
+            (p for p in (tools_dir / "requirements.txt", root / "requirements.txt")
+             if _is_contained_file(p, root)),
+            None,
+        )
+        bundles: list[BundledFile] = []
+        # bundle the whole tools/ tree, not just the entrypoints: tools often
+        # read sibling data/config files and import submodules. containment is
+        # checked against tools/ itself (not the repo root) so a symlink can't
+        # pull arbitrary repo files (e.g. ../.env) into the inventory
+        for f in sorted(tools_dir.rglob("*")):
+            if not _is_contained_file(f, tools_dir) or f == reqs:
+                continue
+            rel_parts = f.relative_to(tools_dir).parts
+            if any(p.startswith(".") or p == "__pycache__" for p in rel_parts) or f.suffix == ".pyc":
+                continue
+            bundled = _read_bundled(f, root)
+            if bundled.encoding == "utf8":
+                _warn_if_secret(bundled.content, bundled.path, inv.warnings)
+            bundles.append(bundled)
+            mark(f)
+        if reqs is not None:
+            bundled_reqs = _read_bundled(reqs, root)
+            # requirements files commonly embed index credentials
+            # (--extra-index-url https://user:token@...), so warn like any bundle
+            _warn_if_secret(bundled_reqs.content, bundled_reqs.path, inv.warnings)
+            bundles.append(replace(bundled_reqs, path="requirements.txt"))
+            mark(reqs)
+        name = _toolset_name(root)
+        reqs_note = f", deps from {reqs.relative_to(root).as_posix()}" if reqs is not None else ""
         inv.items.append(LocalToolItem(
-            id=f"local_tool:{f.stem}", name=f.stem, path=entry,
-            summary=f"local python tool {f.name} -> skill wrapping the script",
-            data=LocalToolData(entrypoint=entry), files=[bundled],
+            id=f"local_tool:{name}", name=name, path="tools",
+            summary=(
+                f"shared toolset skill bundling tools/ "
+                f"({len(entrypoints)} entrypoint script(s)){reqs_note}"
+            ),
+            data=LocalToolData(entrypoints=entrypoints), files=bundles,
         ))
-        mark(f)
 
     # 6. mcp servers + hooks from .mcp.json and settings*.json
     for cfg_path in (root / ".mcp.json", root / ".claude" / "settings.json",
