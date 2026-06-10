@@ -183,10 +183,17 @@ describe("WebCrawlerConnector", () => {
   });
 
   test("does not index a start URL that redirects to another host", async () => {
+    // Redirect off the start host to a closed port on "localhost" (a different
+    // hostname than the 127.0.0.1 start host). The target refuses the
+    // connection instantly on every platform, so the crawler reports the start
+    // URL as skipped without indexing anything — and the test never depends on
+    // external DNS (the old https://external.example.test target resolved
+    // slowly on CI and made this test flaky/time out).
+    const deadPort = await reserveClosedPort();
     const site = await createTestSite({
       "/docs/": (_req, res) => {
         res.writeHead(302, {
-          location: "https://external.example.test/docs/",
+          location: `http://localhost:${deadPort}/elsewhere/`,
         });
         res.end();
       },
@@ -404,6 +411,21 @@ async function createTestSite(routes: Record<string, string | RouteHandler>) {
   return {
     url: `http://127.0.0.1:${address.port}`,
   };
+}
+
+// Binds an ephemeral port and immediately releases it, returning a port number
+// that is reliably closed — connecting to it is refused instantly on every
+// platform (no SYN black-hole stalls like an unrouted loopback alias).
+async function reserveClosedPort(): Promise<number> {
+  const probe = createServer();
+  await new Promise<void>((resolve) => probe.listen(0, "127.0.0.1", resolve));
+  const address = probe.address();
+  if (!address || typeof address === "string") {
+    throw new Error("Probe server did not bind to a TCP port");
+  }
+  const { port } = address;
+  await new Promise<void>((resolve) => probe.close(() => resolve()));
+  return port;
 }
 
 function sendHtml(res: ServerResponse, body: string): void {
