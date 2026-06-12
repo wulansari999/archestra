@@ -9,6 +9,7 @@ import {
   hasArchestraTokenPrefix,
   isSupportedProvider,
   LLM_PROXY_OAUTH_SCOPE,
+  providerRequiresPerUserCredential,
 } from "@archestra/shared";
 import type { FastifyRequest } from "fastify";
 import { type AllowedCacheKey, CacheKey, cacheManager } from "@/cache-manager";
@@ -110,6 +111,32 @@ export async function validateVirtualApiKey(
       400,
       `Virtual API key is not mapped to provider "${expectedProvider}".`,
     );
+  }
+
+  // Per-user providers (GitHub Copilot) hold an individual's token, so it may
+  // only be served through the owner's OWN personal virtual key mapping to
+  // their OWN personal provider key. Re-checked here at runtime (not just at
+  // create/update) so a virtual key mapped before this rule existed, or one
+  // whose scope/mapping changed, can never hand the token to another user.
+  if (
+    isSupportedProvider(expectedProvider) &&
+    providerRequiresPerUserCredential(expectedProvider)
+  ) {
+    const parentKey = await LlmProviderApiKeyModel.findById(
+      mappedProviderKey.providerApiKeyId,
+    );
+    if (
+      resolved.virtualKey.scope !== "personal" ||
+      !parentKey ||
+      parentKey.scope !== "personal" ||
+      parentKey.userId == null ||
+      parentKey.userId !== resolved.virtualKey.authorId
+    ) {
+      throw new ApiError(
+        403,
+        `${expectedProvider} is per-user: it can only be used through your own personal virtual key linked to your own ${expectedProvider} account.`,
+      );
+    }
   }
 
   // Resolve the real provider API key from the secret.
