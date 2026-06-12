@@ -1,6 +1,8 @@
 import { RouteId } from "@archestra/shared";
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
 import { z } from "zod";
+import { isRateLimited } from "@/agents/utils";
+import { CacheKey } from "@/cache-manager";
 import config from "@/config";
 import logger from "@/logging";
 import { ApiError, constructResponseSchema } from "@/types";
@@ -30,7 +32,21 @@ const githubCopilotAuthRoutes: FastifyPluginAsyncZod = async (fastify) => {
         response: constructResponseSchema(DeviceStartResponseSchema),
       },
     },
-    async () => {
+    async ({ user }) => {
+      // Both endpoints relay traffic to GitHub; cap per user so a misbehaving
+      // client can't drive GitHub rate-limit pressure through the backend.
+      if (
+        await isRateLimited(
+          `${CacheKey.GithubCopilotDeviceAuthRateLimit}-start-${user.id}`,
+          { windowMs: 10 * 60_000, maxRequests: 10 },
+        )
+      ) {
+        throw new ApiError(
+          429,
+          "Too many GitHub sign-in attempts — try again later",
+        );
+      }
+
       const response = await fetch(`${deviceAuthBaseUrl()}/login/device/code`, {
         method: "POST",
         headers: {
@@ -92,7 +108,21 @@ const githubCopilotAuthRoutes: FastifyPluginAsyncZod = async (fastify) => {
         response: constructResponseSchema(DevicePollResponseSchema),
       },
     },
-    async ({ body }) => {
+    async ({ body, user }) => {
+      // The frontend polls at GitHub's requested interval (>= 5s); this cap
+      // only trips on clients ignoring interval/slow_down.
+      if (
+        await isRateLimited(
+          `${CacheKey.GithubCopilotDeviceAuthRateLimit}-poll-${user.id}`,
+          { windowMs: 60_000, maxRequests: 30 },
+        )
+      ) {
+        throw new ApiError(
+          429,
+          "Polling too fast — honor the device-flow interval",
+        );
+      }
+
       const response = await fetch(
         `${deviceAuthBaseUrl()}/login/oauth/access_token`,
         {

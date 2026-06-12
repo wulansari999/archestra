@@ -36,6 +36,9 @@ export function GithubCopilotSignIn({
   pollRef.current = poll.mutateAsync;
   const onTokenRef = useRef(onToken);
   onTokenRef.current = onToken;
+  const copyResetTimeout = useRef<ReturnType<typeof setTimeout>>(undefined);
+
+  useEffect(() => () => clearTimeout(copyResetTimeout.current), []);
 
   useEffect(() => {
     if (!flow || completed) return;
@@ -120,7 +123,11 @@ export function GithubCopilotSignIn({
             onClick={async () => {
               await navigator.clipboard.writeText(flow.userCode);
               setCodeCopied(true);
-              setTimeout(() => setCodeCopied(false), 2000);
+              clearTimeout(copyResetTimeout.current);
+              copyResetTimeout.current = setTimeout(
+                () => setCodeCopied(false),
+                2000,
+              );
             }}
           >
             {codeCopied ? (
