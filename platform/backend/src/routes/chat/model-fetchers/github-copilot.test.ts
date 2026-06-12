@@ -82,6 +82,20 @@ describe("fetchGithubCopilotModels", () => {
     expect(headers.get("copilot-integration-id")).toBe("vscode-chat");
   });
 
+  test("surfaces the curated 401 when the token exchange rejects the GitHub token", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(new Response("forbidden", { status: 403 })),
+    );
+
+    await expect(
+      fetchGithubCopilotModels(uniqueGithubToken()),
+    ).rejects.toMatchObject({
+      statusCode: 401,
+      message: expect.stringContaining("Copilot subscription"),
+    });
+  });
+
   test("throws with the upstream status when the models call fails", async () => {
     const fetchMock = vi.fn().mockImplementation((input: string | URL) => {
       if (String(input).includes("copilot_internal")) {

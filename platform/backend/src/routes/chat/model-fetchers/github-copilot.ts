@@ -1,6 +1,7 @@
 import config from "@/config";
 import logger from "@/logging";
 import { createGithubCopilotFetch } from "@/services/github-copilot-token";
+import { ApiError } from "@/types";
 import { joinBaseUrl } from "@/utils/base-url";
 import type { ModelInfo } from "./types";
 
@@ -31,6 +32,12 @@ export async function fetchGithubCopilotModels(
       { status: response.status, error: errorText.slice(0, 500) },
       "Failed to fetch GitHub Copilot models",
     );
+    // The Copilot fetch wrapper reports token-exchange failures as an
+    // OpenAI-shaped error Response; surface its curated message (e.g. "no
+    // Copilot subscription") so key validation shows the real cause.
+    if (response.status === 401) {
+      throw new ApiError(401, extractErrorMessage(errorText));
+    }
     throw new Error(
       `Failed to fetch GitHub Copilot models: ${response.status}`,
     );
@@ -59,6 +66,18 @@ export async function fetchGithubCopilotModels(
 }
 
 // ===== Internal helpers =====
+
+function extractErrorMessage(errorText: string): string {
+  try {
+    const parsed = JSON.parse(errorText) as { error?: { message?: string } };
+    if (parsed.error?.message) {
+      return parsed.error.message;
+    }
+  } catch {
+    // not JSON — fall through to the generic message
+  }
+  return "GitHub token was rejected by the Copilot API";
+}
 
 interface GithubCopilotModel {
   id: string;

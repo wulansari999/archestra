@@ -242,6 +242,31 @@ describe("createGithubCopilotFetch", () => {
     expect(innerFetch).toHaveBeenCalledTimes(1);
   });
 
+  test("returns the exchange failure as an OpenAI-shaped error Response instead of throwing", async () => {
+    // A rejecting fetch makes the OpenAI SDK retry the exchange and surface a
+    // generic connection error; a status Response preserves the real cause.
+    const githubToken = uniqueGithubToken();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(new Response("forbidden", { status: 403 })),
+    );
+    const innerFetch = vi.fn();
+
+    const copilotFetch = createGithubCopilotFetch({ githubToken, innerFetch });
+    const response = await copilotFetch(
+      "https://api.githubcopilot.com/chat/completions",
+      { method: "POST", body: "{}" },
+    );
+
+    expect(innerFetch).not.toHaveBeenCalled();
+    expect(response.status).toBe(401);
+    const body = (await response.json()) as {
+      error: { message: string; type: string };
+    };
+    expect(body.error.type).toBe("authentication_error");
+    expect(body.error.message).toContain("Copilot subscription");
+  });
+
   test("passes requests through untouched when no GitHub token is present", async () => {
     const innerFetch = vi.fn().mockResolvedValue(new Response("nope"));
     const exchangeMock = vi.fn();

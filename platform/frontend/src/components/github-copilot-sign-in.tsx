@@ -55,7 +55,14 @@ export function GithubCopilotSignIn({
         setFlow(null);
         return;
       }
-      const result = await pollRef.current(flow.deviceCode);
+      let result: Awaited<ReturnType<typeof pollRef.current>>;
+      try {
+        result = await pollRef.current(flow.deviceCode);
+      } catch {
+        // network-level failure — transient; keep polling until the deadline
+        if (!cancelled) timeout = setTimeout(tick, intervalMs);
+        return;
+      }
       if (cancelled) return;
       if (!result) {
         // request failed (toast already shown) — abandon this flow
@@ -83,8 +90,12 @@ export function GithubCopilotSignIn({
   const begin = async () => {
     setExpired(false);
     setCompleted(false);
-    const result = await start.mutateAsync();
-    if (result) setFlow(result);
+    try {
+      const result = await start.mutateAsync();
+      if (result) setFlow(result);
+    } catch {
+      // network-level failure — leave the button enabled for another attempt
+    }
   };
 
   if (completed) {

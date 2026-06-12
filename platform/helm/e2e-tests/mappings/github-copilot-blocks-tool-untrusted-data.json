@@ -30,7 +30,7 @@
                 "id": "call_test_123",
                 "type": "function",
                 "function": {
-                  "name": "e2e_read_file_githubcopilot",
+                  "name": "e2e_read_file_github-copilot",
                   "arguments": "{\"file_path\":\"/etc/passwd\"}"
                 }
               }

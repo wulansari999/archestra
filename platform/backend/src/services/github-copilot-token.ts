@@ -147,8 +147,14 @@ export const githubCopilotTokenManager = new GithubCopilotTokenManager();
  * (exchanged from the GitHub OAuth token) plus the required editor-identity
  * headers. A 401 on a cached bearer invalidates it and retries exactly once.
  *
- * Used by the github-copilot proxy adapter/routes, the chat LLM client, and
- * the model fetcher.
+ * Used by the github-copilot proxy adapter, its /models routes, and the model
+ * fetcher (the chat LLM client routes through the local proxy instead, so the
+ * exchange happens exactly once — in the adapter).
+ *
+ * Exchange failures are returned as a synthetic error Response rather than
+ * thrown: the OpenAI SDK treats a rejecting fetch as a connection failure —
+ * it would retry the exchange against GitHub and surface a generic 500
+ * "Connection error." instead of the real status and message.
  */
 export function createGithubCopilotFetch(params: {
   githubToken: string | undefined;
@@ -173,7 +179,12 @@ export function createGithubCopilotFetch(params: {
       return baseFetch(input, { ...init, headers });
     };
 
-    const bearer = await githubCopilotTokenManager.getBearerToken(githubToken);
+    let bearer: string;
+    try {
+      bearer = await githubCopilotTokenManager.getBearerToken(githubToken);
+    } catch (error) {
+      return exchangeErrorResponse(error);
+    }
     const response = await doFetch(bearer);
 
     // A cached bearer can be rejected before its reported expiry (e.g. seat
@@ -182,9 +193,15 @@ export function createGithubCopilotFetch(params: {
     const bodyIsReplayable =
       init?.body === undefined || typeof init.body === "string";
     if (response.status === 401 && bodyIsReplayable) {
+      await response.body?.cancel();
       githubCopilotTokenManager.invalidate(githubToken, bearer);
-      const freshBearer =
-        await githubCopilotTokenManager.getBearerToken(githubToken);
+      let freshBearer: string;
+      try {
+        freshBearer =
+          await githubCopilotTokenManager.getBearerToken(githubToken);
+      } catch (error) {
+        return exchangeErrorResponse(error);
+      }
       return doFetch(freshBearer);
     }
 
@@ -206,6 +223,25 @@ interface CachedBearer {
 
 /** Refresh this long before the bearer's reported expiry. */
 const REFRESH_BUFFER_MS = 60 * 1000;
+
+/**
+ * Converts a token-exchange ApiError into an OpenAI-shaped error Response so
+ * SDK consumers raise a proper status error (no retries, real message).
+ */
+function exchangeErrorResponse(error: unknown): Response {
+  if (error instanceof ApiError) {
+    return Response.json(
+      {
+        error: {
+          message: error.message,
+          type: error.statusCode === 401 ? "authentication_error" : "api_error",
+        },
+      },
+      { status: error.statusCode },
+    );
+  }
+  throw error;
+}
 
 function hashToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
