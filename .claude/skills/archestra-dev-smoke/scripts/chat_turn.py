@@ -26,6 +26,7 @@ import argparse
 import json
 import os
 import sys
+import uuid
 
 from smoke_client import ArchestraApiError, ChatTurnError, ChatTurnResult, SmokeClient
 
@@ -51,7 +52,10 @@ def main() -> int:
             return _fail(f"cannot reach a ready archestra at {base_url}: {exc}\n"
                          "is the local stack up (`tilt up` / `pnpm dev`)?")
 
-        agent_id = _resolve_agent(client, args.agent)
+        try:
+            agent_id = _resolve_agent(client, args.agent)
+        except _AmbiguousAgent as exc:
+            return _fail(str(exc))
         if agent_id is None:
             return _fail(f"no agent matched {args.agent!r}; create one in the UI or pass its id")
 
@@ -70,16 +74,26 @@ def main() -> int:
     return 0
 
 
+class _AmbiguousAgent(RuntimeError):
+    """more than one agent matched the given name -- the caller must disambiguate with an id."""
+
+
 def _resolve_agent(client: SmokeClient, agent: str) -> str | None:
-    """match by exact id first, then by exact name. ambiguous names resolve to the first match."""
-    agents = client.list_agents()
-    for row in agents:
-        if row.get("id") == agent:
-            return agent
-    for row in agents:
-        if row.get("name") == agent and isinstance(row.get("id"), str):
-            return row["id"]
-    return None
+    """resolve --agent to an id. a UUID is used directly (create_conversation 404s if it is wrong);
+    otherwise match exactly by name. an ambiguous name is a hard error -- a smoke check against the
+    wrong agent could report a misleading pass."""
+    try:
+        uuid.UUID(agent)
+        return agent
+    except ValueError:
+        pass
+    matches = [row["id"] for row in client.list_agents(name=agent)
+               if row.get("name") == agent and isinstance(row.get("id"), str)]
+    if len(matches) > 1:
+        raise _AmbiguousAgent(
+            f"{len(matches)} agents are named {agent!r}; pass the agent id instead"
+        )
+    return matches[0] if matches else None
 
 
 def _report(result: ChatTurnResult, *, as_json: bool) -> None:

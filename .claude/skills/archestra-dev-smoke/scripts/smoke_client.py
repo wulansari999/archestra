@@ -75,6 +75,10 @@ class SmokeClient:
     def __init__(self, base_url: str, api_key: str | None = None, timeout: float = 30.0) -> None:
         self.base_url = base_url.rstrip("/") + "/"
         self.timeout = timeout
+        # an api key is a credential too: refuse to attach it over cleartext non-loopback
+        # transport, the same guard sign_in applies to a password.
+        if api_key is not None:
+            _require_secure_transport(self.base_url)
         self._auth = api_key
         self._jar = http.cookiejar.CookieJar()
         self._opener = urllib.request.build_opener(
@@ -102,8 +106,11 @@ class SmokeClient:
 
     # --- agents & keys (read-only; the skill never mutates keys) ----------------------------
 
-    def list_agents(self) -> list[dict[str, JsonValue]]:
-        return _items(self._request("GET", "/api/agents"))
+    def list_agents(self, name: str | None = None) -> list[dict[str, JsonValue]]:
+        """pass `name` to filter server-side: /api/agents is paginated (default 20 rows), so an
+        unfiltered list would silently miss agents on a larger instance."""
+        params = {"name": name} if name else None
+        return _items(self._request("GET", "/api/agents", params=params))
 
     def list_llm_keys(self) -> list[dict[str, JsonValue]]:
         """only used to enrich the 'no llm key configured' diagnostic when a turn fails."""
@@ -144,15 +151,17 @@ class SmokeClient:
         if stream_error is not None:
             raise ChatTurnError(f"chat stream returned an error: {stream_error}")
         text, tool_calls = self._read_assistant_reply(conversation_id, timeout_s=readback_timeout_s)
-        interaction = self._latest_interaction(conversation_id)
+        interactions = self._session_interactions(conversation_id)
         return ChatTurnResult(
             conversation_id=conversation_id,
             text=text,
             tool_calls=tool_calls,
-            input_tokens=_opt_int(interaction, "inputTokens"),
-            output_tokens=_opt_int(interaction, "outputTokens"),
-            cost=_opt_float(interaction, "cost"),
-            model=_opt_str(interaction, "model"),
+            # a tool-loop turn issues several llm calls, each its own interaction row -- sum them
+            # so the reported usage is the whole turn, not just the final step.
+            input_tokens=_sum_int(interactions, "inputTokens"),
+            output_tokens=_sum_int(interactions, "outputTokens"),
+            cost=_sum_float(interactions, "cost"),
+            model=_opt_str(interactions[0] if interactions else None, "model"),
         )
 
     # --- internals --------------------------------------------------------------------------
@@ -167,10 +176,12 @@ class SmokeClient:
         }
         req = self._build_request("POST", "/api/chat", json_body=body)
         deadline = time.monotonic() + timeout_s
-        # per-read socket timeout bounds a single stalled read; the deadline bounds the whole turn.
-        per_read = min(self.timeout, timeout_s)
+        # the socket timeout is the whole turn budget, not a tight per-chunk window: a tool-using or
+        # reasoning turn can legitimately go quiet for many seconds between chunks, and treating that
+        # as a stall is a false failure. the budget caps both a single dead read and (via the
+        # post-read deadline check) the turn overall.
         try:
-            resp = self._opener.open(req, timeout=per_read)
+            resp = self._opener.open(req, timeout=timeout_s)
         except urllib.error.HTTPError as exc:
             raise ArchestraApiError("POST", req.full_url, exc.code, _decode_error(exc)) from exc
         except (OSError, http.client.HTTPException) as exc:
@@ -178,15 +189,15 @@ class SmokeClient:
         try:
             chunks: list[str] = []
             while True:
-                if time.monotonic() > deadline:
-                    raise ChatTurnError(f"chat stream did not finish within {timeout_s:.0f}s")
                 try:
                     block = resp.read(8192)
                 except socket.timeout as exc:
-                    raise ChatTurnError(f"chat stream stalled (no data for {per_read:.0f}s)") from exc
+                    raise ChatTurnError(f"chat stream did not finish within {timeout_s:.0f}s") from exc
                 if not block:
                     break
                 chunks.append(block.decode("utf-8", errors="replace"))
+                if time.monotonic() > deadline:
+                    raise ChatTurnError(f"chat stream did not finish within {timeout_s:.0f}s")
             return _scan_stream_error("".join(chunks))
         finally:
             resp.close()
@@ -204,9 +215,12 @@ class SmokeClient:
             messages = messages if isinstance(messages, list) else []
             for message in reversed(messages):
                 if isinstance(message, dict) and message.get("role") == "assistant":
-                    text, tool_calls = _extract_parts(message.get("parts"))
-                    if text or tool_calls:
-                        return text, tool_calls
+                    parts = message.get("parts")
+                    # the read-back is post-drain, so a persisted assistant message with any parts
+                    # is final. return it even if it has no text (e.g. a tool-only or file reply)
+                    # rather than looping to a false "no reply" timeout.
+                    if isinstance(parts, list) and parts:
+                        return _extract_parts(parts)
             if time.monotonic() > deadline:
                 raise ChatTurnError(
                     f"no assistant reply persisted within {timeout_s:.0f}s "
@@ -214,11 +228,11 @@ class SmokeClient:
                 )
             time.sleep(1.0)
 
-    def _latest_interaction(self, conversation_id: str) -> dict[str, JsonValue] | None:
-        """conversationId is passed to the llm proxy as sessionId, so the turn's interaction is
-        retrievable by that filter. missing interaction is non-fatal -- the reply still stands."""
-        rows = _items(self._request("GET", "/api/interactions", params={"sessionId": conversation_id}))
-        return rows[0] if rows else None
+    def _session_interactions(self, conversation_id: str) -> list[dict[str, JsonValue]]:
+        """conversationId is passed to the llm proxy as sessionId, so every llm call in the turn is
+        retrievable by that filter (newest first). missing interactions are non-fatal -- the reply
+        still stands; usage just reports unknown."""
+        return _items(self._request("GET", "/api/interactions", params={"sessionId": conversation_id}))
 
     def _request(
         self,
@@ -294,9 +308,15 @@ def _items(body: JsonValue) -> list[dict[str, JsonValue]]:
     return out
 
 
+# AI-SDK v5 names a tool part 'tool-<actualToolName>'. the legacy generic 'tool-call'/'tool-result'
+# types carry the name elsewhere, so naively stripping the prefix would report phantom tools named
+# 'call'/'result'; skip them and let 'dynamic-tool' / typed parts carry the real names.
+_LEGACY_TOOL_TYPES = frozenset({"tool-call", "tool-result"})
+
+
 def _extract_parts(parts: JsonValue) -> tuple[str, list[str]]:
     """pull visible text and tool-call names out of a persisted assistant message's parts.
-    AI-SDK tool parts are typed 'tool-<name>' (or carry a toolName); text parts are 'text'."""
+    AI-SDK tool parts are typed 'tool-<name>' (or a 'dynamic-tool' carrying toolName)."""
     text_segments: list[str] = []
     tool_calls: list[str] = []
     if not isinstance(parts, list):
@@ -307,10 +327,14 @@ def _extract_parts(parts: JsonValue) -> tuple[str, list[str]]:
         part_type = part.get("type")
         if part_type == "text" and isinstance(part.get("text"), str):
             text_segments.append(part["text"])
-        elif isinstance(part_type, str) and part_type.startswith("tool-"):
-            tool_calls.append(part_type.removeprefix("tool-"))
         elif part_type == "dynamic-tool" and isinstance(part.get("toolName"), str):
             tool_calls.append(part["toolName"])
+        elif (
+            isinstance(part_type, str)
+            and part_type.startswith("tool-")
+            and part_type not in _LEGACY_TOOL_TYPES
+        ):
+            tool_calls.append(part_type.removeprefix("tool-"))
     return "".join(text_segments).strip(), tool_calls
 
 
@@ -350,14 +374,20 @@ def _opt_str(obj: dict[str, JsonValue] | None, key: str) -> str | None:
     return value if isinstance(value, str) else None
 
 
-def _opt_int(obj: dict[str, JsonValue] | None, key: str) -> int | None:
-    value = obj.get(key) if obj else None
-    return value if isinstance(value, int) else None
+def _sum_int(rows: list[dict[str, JsonValue]], key: str) -> int | None:
+    """sum an integer column across rows; None when no row carries it (unknown, not zero)."""
+    values = [row[key] for row in rows if isinstance(row.get(key), int)]
+    return sum(values) if values else None
 
 
-def _opt_float(obj: dict[str, JsonValue] | None, key: str) -> float | None:
+def _sum_float(rows: list[dict[str, JsonValue]], key: str) -> float | None:
+    """sum a numeric column across rows; None when no row carries it (unknown, not zero)."""
+    values = [v for row in rows if (v := _coerce_float(row.get(key))) is not None]
+    return sum(values) if values else None
+
+
+def _coerce_float(value: JsonValue) -> float | None:
     """cost is a numeric column serialized as a decimal string; coerce it."""
-    value = obj.get(key) if obj else None
     match value:
         case int() | float():
             return float(value)

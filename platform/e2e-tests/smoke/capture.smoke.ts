@@ -61,7 +61,9 @@ test("capture", async ({ page }) => {
     }
     await page.waitForLoadState("networkidle").catch(() => {});
 
-    const screenshot = path.join(outDir, `${slug(appPath)}.png`);
+    // Index-prefix the filename so two routes that slug to the same name (e.g. "/foo-bar" and
+    // "/foo_bar") get distinct files instead of silently overwriting each other.
+    const screenshot = path.join(outDir, `${index}-${slug(appPath)}.png`);
     await page.screenshot({ path: screenshot, fullPage: true });
     manifest.push({ path: appPath, screenshot, errors: [...pageErrors] });
   }
