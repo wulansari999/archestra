@@ -6,6 +6,7 @@ import {
   MAX_DOMAIN_LENGTH,
   MAX_PASSTHROUGH_HEADERS,
   MAX_SUGGESTED_PROMPTS,
+  SupportedProvidersSchema,
 } from "@archestra/shared";
 import {
   createInsertSchema,
@@ -212,6 +213,21 @@ export const SelectAgentSchema = createSelectSchema(
     .array(SuggestedPromptInputSchema)
     .max(MAX_SUGGESTED_PROMPTS)
     .default([]),
+  /**
+   * The provider of the agent's configured default LLM, resolved server-side
+   * from `llmApiKeyId` (or `modelId` when only a model is pinned) so every
+   * viewer sees the agent's true provider — even one who can't access the
+   * owner's per-user key. Null when the agent has no LLM configured. Populated
+   * on read paths (list/get); absent on mutation responses (clients re-fetch).
+   */
+  resolvedLlmProvider: SupportedProvidersSchema.nullable().optional(),
+  /**
+   * Whether the agent's configured provider requires a per-user credential
+   * (e.g. GitHub Copilot). Lets the chat/dialog show a read-only model and
+   * prompt the viewer to connect their own account instead of silently
+   * substituting another model.
+   */
+  llmProviderRequiresPerUserCredential: z.boolean().optional(),
 });
 
 // Base schema without refinement - can be used with .partial()

@@ -76,6 +76,12 @@ export interface ChatPromptInputToolsProps {
   modelSource?: ModelSource | null;
   /** Callback to reset user model override back to agent/org default */
   onResetModelOverride?: () => void;
+  /**
+   * The selected agent pins a per-user-credential model (e.g. GitHub Copilot)
+   * the viewer hasn't connected. Keep the agent's model selected (no auto-swap)
+   * so sending surfaces an inline connect prompt instead of silently switching.
+   */
+  agentRequiresPerUserConnect?: boolean;
   textareaRef: React.RefObject<HTMLTextAreaElement | null>;
 }
 
@@ -100,6 +106,7 @@ const ChatPromptInputTools = memo(function ChatPromptInputTools({
   onAgentChange,
   modelSource,
   onResetModelOverride,
+  agentRequiresPerUserConnect = false,
   textareaRef,
 }: ChatPromptInputToolsProps) {
   const attachments = usePromptInputAttachments();
@@ -255,6 +262,7 @@ const ChatPromptInputTools = memo(function ChatPromptInputTools({
                             ? currentConversationChatApiKeyId
                             : initialApiKeyId
                         }
+                        suppressAutoSelect={agentRequiresPerUserConnect}
                       />
                     </div>
                   </>
@@ -391,6 +399,7 @@ const ChatPromptInputTools = memo(function ChatPromptInputTools({
                     ? currentConversationChatApiKeyId
                     : initialApiKeyId
                 }
+                suppressAutoSelect={agentRequiresPerUserConnect}
               />
               {modelSource && (
                 <Badge

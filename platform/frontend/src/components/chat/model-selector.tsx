@@ -98,6 +98,13 @@ interface ModelSelectorProps {
   apiKeyId?: string | null;
   /** Whether the model query should be enabled */
   enabled?: boolean;
+  /**
+   * Keep the current (unavailable) model instead of auto-selecting a fallback.
+   * Used when the agent pins a per-user-credential model (e.g. GitHub Copilot)
+   * the viewer hasn't connected: we surface a "connect" prompt on send rather
+   * than silently substituting a different provider's model.
+   */
+  suppressAutoSelect?: boolean;
 }
 
 /** Map our provider names to logo provider names
@@ -524,6 +531,7 @@ export const ModelSelector = memo(function ModelSelector({
   variant = "default",
   apiKeyId,
   enabled = true,
+  suppressAutoSelect = false,
 }: ModelSelectorProps) {
   const {
     modelsByProvider,
@@ -668,6 +676,10 @@ export const ModelSelector = memo(function ModelSelector({
   // the stale models would incorrectly trigger auto-select for the wrong provider.
   useEffect(() => {
     if (isPlaceholderData) return;
+    // The agent pins a per-user-credential model the viewer hasn't connected;
+    // keep it selected so the send surfaces a connect prompt instead of
+    // silently switching to another provider's model.
+    if (suppressAutoSelect) return;
     const modelToSelect = resolveAutoSelectedModel({
       selectedModel,
       availableModels: allAvailableModels.map((m) => ({
@@ -682,6 +694,7 @@ export const ModelSelector = memo(function ModelSelector({
   }, [
     isLoading,
     isPlaceholderData,
+    suppressAutoSelect,
     allAvailableModels,
     selectedModel,
     onModelChange,

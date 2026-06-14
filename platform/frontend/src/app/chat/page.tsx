@@ -131,6 +131,7 @@ import {
   getPendingActions,
 } from "@/lib/chat/pending-tool-state";
 import {
+  agentRequiresPerUserConnect,
   deriveModelSource,
   getSavedAgent,
   saveAgent,
@@ -703,6 +704,40 @@ export function ChatPageContent({
     organization?.defaultModelId,
   ]);
 
+  // A shared agent can pin a per-user-credential model (e.g. GitHub Copilot).
+  // When the viewer hasn't connected their own account that model is not in
+  // their available list; keep it selected (no silent swap) so sending it
+  // surfaces an inline connect prompt instead of substituting another provider.
+  type AgentLlmMeta = Record<string, unknown> & {
+    modelId?: string | null;
+    llmProviderRequiresPerUserCredential?: boolean;
+  };
+  const initialAgentRequiresPerUserConnect = useMemo(
+    () =>
+      agentRequiresPerUserConnect({
+        agent: internalAgents.find((a) => a.id === initialAgentId) as
+          | AgentLlmMeta
+          | undefined,
+        selectedModelId: initialModel,
+        isModelAvailable: chatModels.some((m) => m.dbId === initialModel),
+      }),
+    [internalAgents, initialAgentId, initialModel, chatModels],
+  );
+
+  const conversationAgentRequiresPerUserConnect = useMemo(
+    () =>
+      agentRequiresPerUserConnect({
+        agent: internalAgents.find((a) => a.id === conversation?.agentId) as
+          | AgentLlmMeta
+          | undefined,
+        selectedModelId: conversation?.modelId,
+        isModelAvailable: chatModels.some(
+          (m) => m.dbId === conversation?.modelId,
+        ),
+      }),
+    [internalAgents, conversation?.agentId, conversation?.modelId, chatModels],
+  );
+
   // Get selected model's context length for the context indicator
   const selectedModelContextLength = useMemo((): number | null => {
     const modelId = conversation?.modelId ?? initialModel;
@@ -947,6 +982,26 @@ export function ChatPageContent({
   const status = chatSession?.status ?? "ready";
   const setMessages = chatSession?.setMessages;
   const stop = chatSession?.stop;
+
+  // After the user connects a per-user provider (e.g. GitHub Copilot) via the
+  // inline auth card, re-run their original prompt automatically. The connect
+  // mutation already invalidated the model/key caches; find the last user
+  // message and regenerate its turn. A no-op while a turn is in flight so a
+  // connect can't double-send.
+  const handleProviderConnected = useCallback(() => {
+    if (status === "submitted" || status === "streaming") return;
+    if (!regenerateUserMessage) return;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const message = messages[i];
+      if (message.role !== "user") continue;
+      const partIndex = message.parts.findIndex((part) => part.type === "text");
+      if (partIndex < 0) return;
+      const part = message.parts[partIndex];
+      const text = "text" in part ? part.text : "";
+      void regenerateUserMessage({ messageId: message.id, partIndex, text });
+      return;
+    }
+  }, [messages, regenerateUserMessage, status]);
   // Hide the error while the session is auto-recovering (retry scheduled or
   // reattaching to the still-running response) — flashing a "connection
   // error" card for a turn that restores itself a second later reads as
@@ -2201,6 +2256,7 @@ export function ChatPageContent({
                       chatErrors={conversation?.chatErrors ?? []}
                       compactions={conversation?.compactions ?? []}
                       onRegenerateUserMessage={regenerateUserMessage}
+                      onProviderConnected={handleProviderConnected}
                       error={error}
                       onToolApprovalResponse={
                         addToolApprovalResponse
@@ -2317,6 +2373,9 @@ export function ChatPageContent({
                           onResetModelOverride={
                             handleConversationResetModelOverride
                           }
+                          agentRequiresPerUserConnect={
+                            conversationAgentRequiresPerUserConnect
+                          }
                         />
                         <div className="text-center">
                           <Version inline />
@@ -2429,6 +2488,9 @@ export function ChatPageContent({
                         onAgentChange={handleInitialAgentChange}
                         modelSource={initialModelSource}
                         onResetModelOverride={handleResetModelOverride}
+                        agentRequiresPerUserConnect={
+                          initialAgentRequiresPerUserConnect
+                        }
                       />
                     </div>
                   </div>

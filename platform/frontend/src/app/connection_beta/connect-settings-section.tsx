@@ -2,6 +2,7 @@
 
 import {
   providerDisplayNames,
+  providerRequiresPerUserCredential,
   type SupportedProvider,
   SupportedProviders,
 } from "@archestra/shared";
@@ -203,6 +204,10 @@ export function ConnectSettingsSection() {
   const providerKeysByProvider = useMemo(() => {
     const grouped = new Map<string, { id: string; name: string }[]>();
     for (const key of providerApiKeys ?? []) {
+      // Per-user providers (GitHub Copilot) can't back a shared setup default —
+      // each user connects their own account at setup time — so don't offer
+      // them here. The backend also rejects them on save.
+      if (providerRequiresPerUserCredential(key.provider)) continue;
       const list = grouped.get(key.provider) ?? [];
       list.push({ id: key.id, name: key.name });
       grouped.set(key.provider, list);

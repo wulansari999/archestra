@@ -41,34 +41,38 @@ export async function ensureConnectionVirtualKey(params: {
     preferredProviderKeyId,
   } = params;
 
-  // Per-user providers (GitHub Copilot) are passthrough-only on the connection
-  // page — each user's own token is sent directly. They can't be wrapped in a
-  // connection virtual key (a shareable token would leak one account's
-  // credential), so don't provision one.
-  if (providerRequiresPerUserCredential(provider)) {
-    throw new ApiError(
-      400,
-      `${provider} is per-user and uses passthrough auth — it can't be provisioned as a virtual key. Each user connects their own account.`,
-    );
-  }
-
-  const providerApiKey =
-    (await resolvePreferredProviderKey({
-      preferredProviderKeyId,
-      organizationId,
-      provider,
-    })) ??
-    (await LlmProviderApiKeyModel.getCurrentApiKey({
-      organizationId,
-      userId,
-      userTeamIds,
-      provider,
-      conversationId: null,
-    }));
+  // Per-user providers (GitHub Copilot): the connection virtual key must wrap
+  // the connecting user's OWN personal key — never an admin-configured or
+  // org/team-shared default, which would hand one account's credential to
+  // everyone. getCurrentApiKey already resolves only the acting user's personal
+  // key for per-user providers, so skip the admin-default precedence entirely.
+  const isPerUser = providerRequiresPerUserCredential(provider);
+  const providerApiKey = isPerUser
+    ? await LlmProviderApiKeyModel.getCurrentApiKey({
+        organizationId,
+        userId,
+        userTeamIds,
+        provider,
+        conversationId: null,
+      })
+    : ((await resolvePreferredProviderKey({
+        preferredProviderKeyId,
+        organizationId,
+        provider,
+      })) ??
+      (await LlmProviderApiKeyModel.getCurrentApiKey({
+        organizationId,
+        userId,
+        userTeamIds,
+        provider,
+        conversationId: null,
+      })));
   if (!providerApiKey) {
     throw new ApiError(
       400,
-      `No ${provider} API key is configured for your account, teams, or organization. Ask an admin to add one under LLM provider keys.`,
+      isPerUser
+        ? `Connect your own ${provider} account before generating a setup command — each user links their own.`
+        : `No ${provider} API key is configured for your account, teams, or organization. Ask an admin to add one under LLM provider keys.`,
     );
   }
 

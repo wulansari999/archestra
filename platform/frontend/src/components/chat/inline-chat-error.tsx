@@ -36,6 +36,8 @@ interface InlineChatErrorProps {
   agentName?: string;
   selectedModel?: string;
   modelSource?: ModelSource | null;
+  /** Re-run the original prompt after the user connects a per-user provider. */
+  onProviderConnected?: () => void;
 }
 
 export function InlineChatError({
@@ -46,6 +48,7 @@ export function InlineChatError({
   agentName,
   selectedModel,
   modelSource,
+  onProviderConnected,
 }: InlineChatErrorProps) {
   const [isDetailsOpen, setIsDetailsOpen] = useState(false);
   const { data: isAdmin } = useHasPermissions({
@@ -63,6 +66,7 @@ export function InlineChatError({
       <ProviderAuthRequiredCard
         provider={chatError.authAction.provider}
         providerLabel={chatError.authAction.providerLabel}
+        onConnected={onProviderConnected}
       />
     );
   }

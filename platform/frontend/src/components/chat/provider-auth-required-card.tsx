@@ -10,6 +10,12 @@ import { useCreateLlmProviderApiKey } from "@/lib/llm-provider-api-keys.query";
 interface ProviderAuthRequiredCardProps {
   provider: SupportedProvider;
   providerLabel: string;
+  /**
+   * Called once the user has connected their account (the personal key was
+   * created). The chat uses this to auto-resend the original prompt so the user
+   * doesn't have to retype it.
+   */
+  onConnected?: () => void;
 }
 
 /**
@@ -21,6 +27,7 @@ interface ProviderAuthRequiredCardProps {
 export function ProviderAuthRequiredCard({
   provider,
   providerLabel,
+  onConnected,
 }: ProviderAuthRequiredCardProps) {
   const createKey = useCreateLlmProviderApiKey();
 
@@ -48,9 +55,10 @@ export function ProviderAuthRequiredCard({
                     apiKey: token,
                     scope: "personal",
                   });
-                  toast.success(
-                    "GitHub Copilot connected — send your message again.",
-                  );
+                  toast.success("GitHub Copilot connected — retrying…");
+                  // Re-run the original prompt now that the key exists; the
+                  // create mutation already invalidated the model/key caches.
+                  onConnected?.();
                 } catch {
                   // handleApiError already surfaced the failure (e.g. no seat)
                 }

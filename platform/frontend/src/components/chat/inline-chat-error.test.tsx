@@ -1,4 +1,5 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("sonner", () => ({
@@ -14,12 +15,17 @@ vi.mock("@/lib/auth/auth.query", () => ({
 vi.mock("@/lib/llm-provider-api-keys.query", () => ({
   useCreateLlmProviderApiKey: () => ({
     isPending: false,
-    mutateAsync: vi.fn(),
+    mutateAsync: vi.fn().mockResolvedValue({ id: "key-1" }),
   }),
 }));
 
+// Invoke onToken on click so we can exercise the connect → auto-resend flow.
 vi.mock("@/components/github-copilot-sign-in", () => ({
-  GithubCopilotSignIn: () => <button type="button">Sign in with GitHub</button>,
+  GithubCopilotSignIn: ({ onToken }: { onToken: (token: string) => void }) => (
+    <button type="button" onClick={() => onToken("gho_test")}>
+      Sign in with GitHub
+    </button>
+  ),
 }));
 
 import { InlineChatError } from "./inline-chat-error";
@@ -231,5 +237,34 @@ describe("InlineChatError", () => {
     expect(
       screen.getByRole("button", { name: /Sign in with GitHub/i }),
     ).toBeInTheDocument();
+  });
+
+  it("auto-resends the original prompt after connecting the provider", async () => {
+    const onProviderConnected = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <InlineChatError
+        error={
+          new Error(
+            JSON.stringify({
+              code: "provider_auth_required",
+              message: "Connect your GitHub Copilot account to use this model.",
+              isRetryable: false,
+              authAction: {
+                provider: "github-copilot",
+                providerLabel: "GitHub Copilot",
+              },
+            }),
+          )
+        }
+        onProviderConnected={onProviderConnected}
+      />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: /Sign in with GitHub/i }),
+    );
+
+    await waitFor(() => expect(onProviderConnected).toHaveBeenCalledTimes(1));
   });
 });

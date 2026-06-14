@@ -10973,6 +10973,8 @@ export type GetAgentsResponses = {
                 summaryTitle: string;
                 prompt: string;
             }>;
+            resolvedLlmProvider?: 'openai' | 'gemini' | 'anthropic' | 'bedrock' | 'cohere' | 'cerebras' | 'mistral' | 'perplexity' | 'groq' | 'xai' | 'openrouter' | 'vllm' | 'ollama' | 'zhipuai' | 'deepseek' | 'minimax' | 'azure' | 'github-copilot';
+            llmProviderRequiresPerUserCredential?: boolean;
         }>;
         pagination: {
             currentPage: number;
@@ -11202,6 +11204,8 @@ export type CreateAgentResponses = {
             summaryTitle: string;
             prompt: string;
         }>;
+        resolvedLlmProvider?: 'openai' | 'gemini' | 'anthropic' | 'bedrock' | 'cohere' | 'cerebras' | 'mistral' | 'perplexity' | 'groq' | 'xai' | 'openrouter' | 'vllm' | 'ollama' | 'zhipuai' | 'deepseek' | 'minimax' | 'azure' | 'github-copilot';
+        llmProviderRequiresPerUserCredential?: boolean;
     };
 };
 
@@ -11400,6 +11404,8 @@ export type GetAllAgentsResponses = {
             summaryTitle: string;
             prompt: string;
         }>;
+        resolvedLlmProvider?: 'openai' | 'gemini' | 'anthropic' | 'bedrock' | 'cohere' | 'cerebras' | 'mistral' | 'perplexity' | 'groq' | 'xai' | 'openrouter' | 'vllm' | 'ollama' | 'zhipuai' | 'deepseek' | 'minimax' | 'azure' | 'github-copilot';
+        llmProviderRequiresPerUserCredential?: boolean;
     }>;
 };
 
@@ -11573,6 +11579,8 @@ export type GetDefaultMcpGatewayResponses = {
             summaryTitle: string;
             prompt: string;
         }>;
+        resolvedLlmProvider?: 'openai' | 'gemini' | 'anthropic' | 'bedrock' | 'cohere' | 'cerebras' | 'mistral' | 'perplexity' | 'groq' | 'xai' | 'openrouter' | 'vllm' | 'ollama' | 'zhipuai' | 'deepseek' | 'minimax' | 'azure' | 'github-copilot';
+        llmProviderRequiresPerUserCredential?: boolean;
     };
 };
 
@@ -11746,6 +11754,8 @@ export type GetDefaultLlmProxyResponses = {
             summaryTitle: string;
             prompt: string;
         }>;
+        resolvedLlmProvider?: 'openai' | 'gemini' | 'anthropic' | 'bedrock' | 'cohere' | 'cerebras' | 'mistral' | 'perplexity' | 'groq' | 'xai' | 'openrouter' | 'vllm' | 'ollama' | 'zhipuai' | 'deepseek' | 'minimax' | 'azure' | 'github-copilot';
+        llmProviderRequiresPerUserCredential?: boolean;
     };
 };
 
@@ -11997,6 +12007,8 @@ export type ImportAgentResponses = {
                 summaryTitle: string;
                 prompt: string;
             }>;
+            resolvedLlmProvider?: 'openai' | 'gemini' | 'anthropic' | 'bedrock' | 'cohere' | 'cerebras' | 'mistral' | 'perplexity' | 'groq' | 'xai' | 'openrouter' | 'vllm' | 'ollama' | 'zhipuai' | 'deepseek' | 'minimax' | 'azure' | 'github-copilot';
+            llmProviderRequiresPerUserCredential?: boolean;
         };
         warnings: Array<{
             type: 'tool' | 'knowledgeBase' | 'connector' | 'delegation';
@@ -12263,6 +12275,8 @@ export type GetAgentResponses = {
             summaryTitle: string;
             prompt: string;
         }>;
+        resolvedLlmProvider?: 'openai' | 'gemini' | 'anthropic' | 'bedrock' | 'cohere' | 'cerebras' | 'mistral' | 'perplexity' | 'groq' | 'xai' | 'openrouter' | 'vllm' | 'ollama' | 'zhipuai' | 'deepseek' | 'minimax' | 'azure' | 'github-copilot';
+        llmProviderRequiresPerUserCredential?: boolean;
     };
 };
 
@@ -12485,6 +12499,8 @@ export type UpdateAgentResponses = {
             summaryTitle: string;
             prompt: string;
         }>;
+        resolvedLlmProvider?: 'openai' | 'gemini' | 'anthropic' | 'bedrock' | 'cohere' | 'cerebras' | 'mistral' | 'perplexity' | 'groq' | 'xai' | 'openrouter' | 'vllm' | 'ollama' | 'zhipuai' | 'deepseek' | 'minimax' | 'azure' | 'github-copilot';
+        llmProviderRequiresPerUserCredential?: boolean;
     };
 };
 
@@ -12660,6 +12676,8 @@ export type CloneAgentResponses = {
             summaryTitle: string;
             prompt: string;
         }>;
+        resolvedLlmProvider?: 'openai' | 'gemini' | 'anthropic' | 'bedrock' | 'cohere' | 'cerebras' | 'mistral' | 'perplexity' | 'groq' | 'xai' | 'openrouter' | 'vllm' | 'ollama' | 'zhipuai' | 'deepseek' | 'minimax' | 'azure' | 'github-copilot';
+        llmProviderRequiresPerUserCredential?: boolean;
     };
 };
 
@@ -12995,6 +13013,8 @@ export type RestoreAgentResponses = {
             summaryTitle: string;
             prompt: string;
         }>;
+        resolvedLlmProvider?: 'openai' | 'gemini' | 'anthropic' | 'bedrock' | 'cohere' | 'cerebras' | 'mistral' | 'perplexity' | 'groq' | 'xai' | 'openrouter' | 'vllm' | 'ollama' | 'zhipuai' | 'deepseek' | 'minimax' | 'azure' | 'github-copilot';
+        llmProviderRequiresPerUserCredential?: boolean;
     };
 };
 

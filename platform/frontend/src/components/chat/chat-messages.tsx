@@ -155,6 +155,8 @@ interface ChatMessagesProps {
     partIndex: number;
     text: string;
   }) => Promise<void>;
+  /** Re-run the original prompt after the user connects a per-user provider. */
+  onProviderConnected?: () => void;
   error?: Error | null;
   chatErrors?: archestraApiTypes.GetChatConversationResponses["200"]["chatErrors"];
   compactions?: archestraApiTypes.GetChatConversationResponses["200"]["compactions"];
@@ -217,6 +219,7 @@ export function ChatMessages({
   isLoadingConversation = false,
   onMessagesUpdate,
   onRegenerateUserMessage,
+  onProviderConnected,
   error = null,
   chatErrors = [],
   compactions = [],
@@ -508,6 +511,7 @@ export function ChatMessages({
                     agentName={agentName}
                     selectedModel={selectedModel}
                     modelSource={modelSource}
+                    onProviderConnected={onProviderConnected}
                   />
                 );
               }
@@ -1337,6 +1341,7 @@ export function ChatMessages({
                 agentName={agentName}
                 selectedModel={selectedModel}
                 modelSource={modelSource}
+                onProviderConnected={onProviderConnected}
               />
             )}
             {pendingToolCalls.map((toolCall) => (
