@@ -76,6 +76,10 @@ const ChatTitleGenerationAgentConfigSchema = z.object({
   name: z.literal(BUILT_IN_AGENT_IDS.CHAT_TITLE_GENERATION),
 });
 
+const AppRuntimeAgentConfigSchema = z.object({
+  name: z.literal(BUILT_IN_AGENT_IDS.APP_RUNTIME),
+});
+
 // Discriminated union — add future built-in agents here
 export const BuiltInAgentConfigSchema = z.discriminatedUnion("name", [
   PolicyConfigAgentConfigSchema,
@@ -83,6 +87,7 @@ export const BuiltInAgentConfigSchema = z.discriminatedUnion("name", [
   DualLlmQuarantineAgentConfigSchema,
   ContextCompactionAgentConfigSchema,
   ChatTitleGenerationAgentConfigSchema,
+  AppRuntimeAgentConfigSchema,
 ]);
 
 export type BuiltInAgentConfig = z.infer<typeof BuiltInAgentConfigSchema>;

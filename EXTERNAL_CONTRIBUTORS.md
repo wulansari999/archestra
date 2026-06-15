@@ -594,3 +594,17 @@ To unblock real contributors without re-opening the floodgates, sign in via GitH
 - @rajushmn-design
 - @Gardner-Programs
 - @Amphy2000
+- @rissrice2105-agent
+- @giangtn99dev-boop
+- @Moliqun
+- @andrefeix
+- @sanchal-coder
+- @rahulrajesh21
+- @hieuluongxuan
+- @Bhavya-Jain5
+- @harsha7123
+- @Kyzgor
+- @vedjaw
+- @abdrassulov
+- @XananasX7
+- @ambientclaw-commits
