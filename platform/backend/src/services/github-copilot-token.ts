@@ -11,7 +11,7 @@
  * per GitHub token (refreshing 60s before expiry) and single-flights
  * concurrent exchanges for the same token.
  */
-import { createHash } from "node:crypto";
+import { createHmac, randomBytes } from "node:crypto";
 import { LRUCacheManager } from "@/cache-manager";
 import config from "@/config";
 import logger from "@/logging";
@@ -243,11 +243,15 @@ function exchangeErrorResponse(error: unknown): Response {
   throw error;
 }
 
-// sha256 here derives an in-memory cache key for the bearer LRU — it is never
-// stored, persisted, or compared against a stored hash, so a slow password KDF
-// (bcrypt/scrypt/argon2) would only add latency to every proxy request. (CodeQL
-// js/insufficient-password-hash flags this pattern; dismissed as a false
-// positive — it targets password *storage*, not cache-key derivation.)
+// Per-process random key for the cache-key HMAC below. Regenerated on each
+// boot — the cache is in-memory only, so a cold start on restart is fine.
+const TOKEN_CACHE_HMAC_KEY = randomBytes(32);
+
+// Derives an in-memory cache key for the bearer LRU. It is never stored,
+// persisted, or compared against a stored hash, so a slow password KDF
+// (bcrypt/scrypt/argon2) would only add latency to every proxy request. HMAC
+// with a per-process key (rather than bare SHA-256) means an observer of cache
+// keys can't pre-compute lookups against known token formats.
 function hashToken(token: string): string {
-  return createHash("sha256").update(token).digest("hex");
+  return createHmac("sha256", TOKEN_CACHE_HMAC_KEY).update(token).digest("hex");
 }

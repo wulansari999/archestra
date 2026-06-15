@@ -1755,6 +1755,12 @@ export function sanitizeChatErrorForFrontend(
     sanitized.usageLimitExceeded = true;
     sanitized.usageLimitEntityType = error.usageLimitEntityType;
   }
+  // Preserve the connect-account action so the inline "Connect <provider>" card
+  // still renders in slim chat error mode. It carries no secrets — only the
+  // provider name and label.
+  if (error.authAction) {
+    sanitized.authAction = error.authAction;
+  }
   return sanitized;
 }
 

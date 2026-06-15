@@ -1783,6 +1783,28 @@ describe("ProviderError", () => {
       usageLimitEntityType: "organization",
     });
   });
+
+  it("preserves authAction so the connect card renders in slim chat mode", () => {
+    expect(
+      sanitizeChatErrorForFrontend({
+        code: ChatErrorCode.ProviderAuthRequired,
+        message: "Connect your GitHub Copilot account to use this model.",
+        isRetryable: false,
+        authAction: {
+          provider: "github-copilot",
+          providerLabel: "GitHub Copilot",
+        },
+      }),
+    ).toEqual({
+      code: ChatErrorCode.ProviderAuthRequired,
+      message: "Connect your GitHub Copilot account to use this model.",
+      isRetryable: false,
+      authAction: {
+        provider: "github-copilot",
+        providerLabel: "GitHub Copilot",
+      },
+    });
+  });
 });
 
 describe("mapProviderError - EmptyModelResponseError", () => {
