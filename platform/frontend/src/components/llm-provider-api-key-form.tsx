@@ -341,9 +341,13 @@ export function LlmProviderApiKeyForm({
 
   const hasApiKeyChanged =
     apiKey !== LLM_PROVIDER_API_KEY_PLACEHOLDER && apiKey !== "";
-  // GitHub Copilot hides the raw token field — a credential exists if the user
-  // just signed in (token captured) or an existing key is being edited.
-  const hasCopilotCredential = isEditMode || hasApiKeyChanged;
+  // GitHub Copilot hides the raw token field — a credential exists only when an
+  // existing key is being edited or the user just signed in (a real token is
+  // captured). Note: `apiKey` defaults to `null` on create, which `hasApiKeyChanged`
+  // treats as "changed" — so check for an actual token here, not that flag, or
+  // the "connected" card would show before sign-in.
+  const hasCopilotCredential =
+    isEditMode || (!!apiKey && apiKey !== LLM_PROVIDER_API_KEY_PLACEHOLDER);
   const providerConfig = PROVIDER_CONFIG[provider];
   const isBaseUrlRequired =
     providerConfig.baseUrlRequired && !providerBaseUrls?.[provider];
