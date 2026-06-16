@@ -160,14 +160,78 @@ jobs:
       GCP_SERVICE_ACCOUNT_NAME: ${{ secrets.DEVELOPMENT_OAUTH_PROXY_RELEASER_GCP_SERVICE_ACCOUNT_NAME }}
       GCP_WORKLOAD_IDENTITY_PROVIDER_IDENTIFIER: ${{ secrets.DEVELOPMENT_OAUTH_PROXY_RELEASER_GCP_WORKLOAD_IDENTITY_PROVIDER_IDENTIFIER }}
 
+  detect-sandbox-base-changes:
+    name: Detect Sandbox Base changes
+    # Gate the (otherwise per-release) sandbox base build on whether its image
+    # contents actually changed since the previous release. Nothing pins
+    # sandbox-base:<version> — the engine consumes it via
+    # ARCHESTRA_DAGGER_RUNTIME_IMAGE and :latest floats — so skipping an unchanged
+    # release leaves no dangling reference.
+    if: ${{ needs.release-please.outputs.platform_should_publish == 'true' }}
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    needs:
+      - release-please
+    permissions:
+      contents: read # Required to checkout history/tags and diff the release tags.
+    outputs:
+      changed: ${{ steps.diff.outputs.changed }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          ref: ${{ needs.release-please.outputs.platform_checkout_ref }}
+
+      - name: Diff sandbox_base against the previous release tag
+        id: diff
+        env:
+          TAG: ${{ needs.release-please.outputs.platform_tag_name }}
+        run: |
+          # No `set -e`: any unexpected failure falls through to changed=true so a
+          # detection problem rebuilds rather than silently ships a stale image (a
+          # failed/skipped dependency would also skip the build job).
+          set -uo pipefail
+          git fetch --force --tags origin 'refs/tags/platform-v*:refs/tags/platform-v*' || true
+
+          CURRENT_COMMIT="$(git rev-parse "${TAG}^{commit}" 2>/dev/null || true)"
+          PREV_TAG=""
+          if [ -n "${CURRENT_COMMIT}" ]; then
+            # --first-parent so a merged side branch's tag can't pose as the
+            # previous release; --tags because release-please tags are lightweight.
+            PREV_TAG="$(git describe --tags --match 'platform-v*' --abbrev=0 --first-parent "${CURRENT_COMMIT}^" 2>/dev/null || true)"
+          fi
+
+          if [ -z "${CURRENT_COMMIT}" ] || [ -z "${PREV_TAG}" ]; then
+            echo "No previous platform tag resolved (current=${CURRENT_COMMIT:-none}); building."
+            echo "changed=true" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          # Diff the whole dir (README/Makefile excluded — they don't affect the
+          # image) so a future COPY can't under-detect. A dagger.rs DEFAULT_* change
+          # can't drift past this: check:sandbox-base forces a matching edit here.
+          if git diff --quiet "${PREV_TAG}" "${CURRENT_COMMIT}" -- \
+              platform/sandbox_base/ \
+              ':(exclude)platform/sandbox_base/README.md' \
+              ':(exclude)platform/sandbox_base/Makefile'; then
+            echo "sandbox_base unchanged since ${PREV_TAG}; skipping image build."
+            echo "changed=false" >> "${GITHUB_OUTPUT}"
+          else
+            echo "sandbox_base changed since ${PREV_TAG}; building image."
+            echo "changed=true" >> "${GITHUB_OUTPUT}"
+          fi
+
   build-and-push-sandbox-base-docker-image:
     name: Build and push Sandbox Base Docker image
-    # The sandbox base ships with every platform release: the engine pulls it as
-    # the pre-baked code-runtime base, so it is published whenever the platform is.
-    if: ${{ needs.release-please.outputs.platform_should_publish == 'true' }}
+    # Published only when sandbox_base/ changed since the previous release (see
+    # detect-sandbox-base-changes), or unconditionally on a manual existing-release
+    # publish. The engine pulls the baked image as its pre-baked code-runtime base.
+    if: ${{ needs.release-please.outputs.platform_should_publish == 'true' && (needs.detect-sandbox-base-changes.outputs.changed == 'true' || (github.event_name == 'workflow_dispatch' && inputs.publish_existing_release)) }}
     uses: ./.github/workflows/build-sandbox-base-docker-image.yml
     needs:
       - release-please
+      - detect-sandbox-base-changes
     permissions:
       contents: read # Required to invoke the reusable image build workflow.
       id-token: write # Required for Workload Identity Federation.
