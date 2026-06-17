@@ -297,10 +297,12 @@ class SandboxRuntimeService {
     if (cliBin) {
       process.env._EXPERIMENTAL_DAGGER_CLI_BIN = cliBin;
     }
-    // the native addon reads these from the process env at warm-base build time;
-    // baseImage already resolves the operator override, so writing it back is the
-    // bridge from config to the Rust session.
-    process.env.ARCHESTRA_DAGGER_RUNTIME_IMAGE = baseImage;
+    // the native addon reads these from the process env at warm-base build time.
+    // baseImage is undefined when no image is forced (non-prebuilt, no override),
+    // so leave the var unset and let the runtime use its stock buildable base.
+    if (baseImage) {
+      process.env.ARCHESTRA_DAGGER_RUNTIME_IMAGE = baseImage;
+    }
     process.env.ARCHESTRA_CODE_RUNTIME_BASE_PREBUILT = basePrebuilt
       ? "true"
       : "false";

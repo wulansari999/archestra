@@ -401,6 +401,33 @@ export const parseBasePrebuilt = ({
   return value === "true";
 };
 
+/**
+ * The Dagger sandbox base image, or `undefined` to let the native runtime fall
+ * back to its stock buildable base. An operator override always wins. Otherwise
+ * the baked `sandbox-base` (which only works in prebuilt mode — it runs as a
+ * non-root user with the toolchain already installed) is used when prebuilt, and
+ * nothing is forced when not, so a `prebuilt=false` deployment without an
+ * override keeps the build-at-warm-time path on a stock image.
+ *
+ * @public — exported for testability
+ */
+export const resolveDaggerSandboxImage = ({
+  override,
+  prebuilt,
+  version,
+}: {
+  override?: string | undefined;
+  prebuilt: boolean;
+  version: string;
+}): string | undefined => {
+  if (override) {
+    return override;
+  }
+  return prebuilt
+    ? `europe-west1-docker.pkg.dev/friendly-path-465518-r6/archestra-public/sandbox-base:${version}`
+    : undefined;
+};
+
 /** @public — exported for testability */
 export const parseDatabasePoolMax = (envValue?: string | undefined): number => {
   const value = envValue?.trim();
@@ -714,15 +741,16 @@ const mcpServerBaseImage =
   process.env.ARCHESTRA_ORCHESTRATOR_MCP_SERVER_BASE_IMAGE ||
   `europe-west1-docker.pkg.dev/friendly-path-465518-r6/archestra-public/mcp-server-base:${appVersion}`;
 
-// The Dagger code-runtime sandbox base. Defaults to the baked `sandbox-base`
-// image published with each release (tagged with the running platform version),
-// which ships the apt toolbelt + uv venv + deps so a network-restricted engine
-// never reaches github/debian/pypi at warm time. Operators override the image
-// (e.g. an air-gapped mirror) via ARCHESTRA_DAGGER_RUNTIME_IMAGE.
 const daggerRuntimeImageOverride = process.env.ARCHESTRA_DAGGER_RUNTIME_IMAGE;
-const daggerRuntimeImage =
-  daggerRuntimeImageOverride ||
-  `europe-west1-docker.pkg.dev/friendly-path-465518-r6/archestra-public/sandbox-base:${appVersion}`;
+const daggerRuntimeBasePrebuilt = parseBasePrebuilt({
+  envValue: process.env.ARCHESTRA_CODE_RUNTIME_BASE_PREBUILT,
+  usingDefaultImage: !daggerRuntimeImageOverride,
+});
+const daggerRuntimeImage = resolveDaggerSandboxImage({
+  override: daggerRuntimeImageOverride,
+  prebuilt: daggerRuntimeBasePrebuilt,
+  version: appVersion,
+});
 
 const knowledgeFileBlobStorageProvider = parseBlobStorageProvider(
   process.env.ARCHESTRA_KNOWLEDGE_BASE_FILE_UPLOAD_BLOB_STORAGE_PROVIDER,
@@ -1199,10 +1227,7 @@ const config = {
     enabled: daggerRuntimeEnabled,
     runnerHost: daggerRuntimeRunnerHost,
     baseImage: daggerRuntimeImage,
-    basePrebuilt: parseBasePrebuilt({
-      envValue: process.env.ARCHESTRA_CODE_RUNTIME_BASE_PREBUILT,
-      usingDefaultImage: !daggerRuntimeImageOverride,
-    }),
+    basePrebuilt: daggerRuntimeBasePrebuilt,
     cliBin:
       process.env.ARCHESTRA_DAGGER_RUNTIME_CLI_BIN ||
       process.env.ARCHESTRA_CODE_RUNTIME_DAGGER_CLI_BIN ||

@@ -33,6 +33,7 @@ import config, {
   parseSampleRate,
   parseTrustProxy,
   parseVirtualKeyDefaultExpiration,
+  resolveDaggerSandboxImage,
 } from "./config";
 
 // Mock the logger
@@ -895,6 +896,39 @@ describe("parseBasePrebuilt", () => {
     expect(
       parseBasePrebuilt({ envValue: "yes", usingDefaultImage: true }),
     ).toBe(false);
+  });
+});
+
+describe("resolveDaggerSandboxImage", () => {
+  test("should return the override regardless of prebuilt", () => {
+    expect(
+      resolveDaggerSandboxImage({
+        override: "registry.example.com/custom:1",
+        prebuilt: true,
+        version: "1.2.3",
+      }),
+    ).toBe("registry.example.com/custom:1");
+    expect(
+      resolveDaggerSandboxImage({
+        override: "registry.example.com/custom:1",
+        prebuilt: false,
+        version: "1.2.3",
+      }),
+    ).toBe("registry.example.com/custom:1");
+  });
+
+  test("should return the version-tagged baked image when prebuilt and no override", () => {
+    expect(
+      resolveDaggerSandboxImage({ prebuilt: true, version: "1.2.3" }),
+    ).toBe(
+      "europe-west1-docker.pkg.dev/friendly-path-465518-r6/archestra-public/sandbox-base:1.2.3",
+    );
+  });
+
+  test("should return undefined when not prebuilt and no override (stock build path)", () => {
+    expect(
+      resolveDaggerSandboxImage({ prebuilt: false, version: "1.2.3" }),
+    ).toBeUndefined();
   });
 });
 
