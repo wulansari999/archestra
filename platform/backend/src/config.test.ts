@@ -853,28 +853,48 @@ describe("parseDatabasePoolMax", () => {
 });
 
 describe("parseBasePrebuilt", () => {
-  test("should default to true when unset", () => {
-    expect(parseBasePrebuilt(undefined)).toBe(true);
+  test("should default to true when unset and using the default image", () => {
+    expect(parseBasePrebuilt({ usingDefaultImage: true })).toBe(true);
   });
 
-  test("should default to true for empty or whitespace-only value", () => {
-    expect(parseBasePrebuilt("")).toBe(true);
-    expect(parseBasePrebuilt("   ")).toBe(true);
+  test("should default to false when unset and the image is overridden", () => {
+    expect(parseBasePrebuilt({ usingDefaultImage: false })).toBe(false);
   });
 
-  test("should be true only for an exact 'true'", () => {
-    expect(parseBasePrebuilt("true")).toBe(true);
-    expect(parseBasePrebuilt("  true  ")).toBe(true);
+  test("should track usingDefaultImage for empty or whitespace-only value", () => {
+    expect(parseBasePrebuilt({ envValue: "", usingDefaultImage: true })).toBe(
+      true,
+    );
+    expect(
+      parseBasePrebuilt({ envValue: "   ", usingDefaultImage: false }),
+    ).toBe(false);
   });
 
-  test("should be false for 'false'", () => {
-    expect(parseBasePrebuilt("false")).toBe(false);
+  test("should honor an explicit 'true' over usingDefaultImage", () => {
+    expect(
+      parseBasePrebuilt({ envValue: "true", usingDefaultImage: false }),
+    ).toBe(true);
+    expect(
+      parseBasePrebuilt({ envValue: "  true  ", usingDefaultImage: false }),
+    ).toBe(true);
   });
 
-  test("should be false for any other explicit value", () => {
-    expect(parseBasePrebuilt("1")).toBe(false);
-    expect(parseBasePrebuilt("True")).toBe(false);
-    expect(parseBasePrebuilt("yes")).toBe(false);
+  test("should honor an explicit 'false' over usingDefaultImage", () => {
+    expect(
+      parseBasePrebuilt({ envValue: "false", usingDefaultImage: true }),
+    ).toBe(false);
+  });
+
+  test("should treat any other explicit value as false", () => {
+    expect(parseBasePrebuilt({ envValue: "1", usingDefaultImage: true })).toBe(
+      false,
+    );
+    expect(
+      parseBasePrebuilt({ envValue: "True", usingDefaultImage: true }),
+    ).toBe(false);
+    expect(
+      parseBasePrebuilt({ envValue: "yes", usingDefaultImage: true }),
+    ).toBe(false);
   });
 });
 
