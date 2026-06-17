@@ -289,13 +289,21 @@ class SandboxRuntimeService {
   }
 
   private applyDaggerEnv(): void {
-    const { runnerHost, cliBin } = config.daggerRuntime;
+    const { runnerHost, cliBin, baseImage, basePrebuilt } =
+      config.daggerRuntime;
     if (runnerHost) {
       process.env._EXPERIMENTAL_DAGGER_RUNNER_HOST = runnerHost;
     }
     if (cliBin) {
       process.env._EXPERIMENTAL_DAGGER_CLI_BIN = cliBin;
     }
+    // the native addon reads these from the process env at warm-base build time;
+    // baseImage already resolves the operator override, so writing it back is the
+    // bridge from config to the Rust session.
+    process.env.ARCHESTRA_DAGGER_RUNTIME_IMAGE = baseImage;
+    process.env.ARCHESTRA_CODE_RUNTIME_BASE_PREBUILT = basePrebuilt
+      ? "true"
+      : "false";
   }
 
   private limits(overrides?: LimitOverrides) {

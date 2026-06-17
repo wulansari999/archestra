@@ -377,6 +377,23 @@ export const parseContentMaxLength = (
   return parsed;
 };
 
+/**
+ * Whether the Dagger sandbox base is pre-baked (skip the apt/uv warm-base build,
+ * verify only the provenance marker). Defaults true to match the baked default
+ * image; an explicit value wins so an operator pointing at a non-baked custom
+ * image can turn it off. Only an exact "true"/"false" is honored; an unset or
+ * empty value falls back to the default.
+ *
+ * @public — exported for testability
+ */
+export const parseBasePrebuilt = (envValue?: string | undefined): boolean => {
+  const value = envValue?.trim();
+  if (!value) {
+    return true;
+  }
+  return value === "true";
+};
+
 /** @public — exported for testability */
 export const parseDatabasePoolMax = (envValue?: string | undefined): number => {
   const value = envValue?.trim();
@@ -689,6 +706,15 @@ export const getAnalyticsConfig = () => ({
 const mcpServerBaseImage =
   process.env.ARCHESTRA_ORCHESTRATOR_MCP_SERVER_BASE_IMAGE ||
   `europe-west1-docker.pkg.dev/friendly-path-465518-r6/archestra-public/mcp-server-base:${appVersion}`;
+
+// The Dagger code-runtime sandbox base. Defaults to the baked `sandbox-base`
+// image published with each release (tagged with the running platform version),
+// which ships the apt toolbelt + uv venv + deps so a network-restricted engine
+// never reaches github/debian/pypi at warm time. Operators override the image
+// (e.g. an air-gapped mirror) via ARCHESTRA_DAGGER_RUNTIME_IMAGE.
+const daggerRuntimeImage =
+  process.env.ARCHESTRA_DAGGER_RUNTIME_IMAGE ||
+  `europe-west1-docker.pkg.dev/friendly-path-465518-r6/archestra-public/sandbox-base:${appVersion}`;
 
 const knowledgeFileBlobStorageProvider = parseBlobStorageProvider(
   process.env.ARCHESTRA_KNOWLEDGE_BASE_FILE_UPLOAD_BLOB_STORAGE_PROVIDER,
@@ -1164,6 +1190,10 @@ const config = {
   daggerRuntime: {
     enabled: daggerRuntimeEnabled,
     runnerHost: daggerRuntimeRunnerHost,
+    baseImage: daggerRuntimeImage,
+    basePrebuilt: parseBasePrebuilt(
+      process.env.ARCHESTRA_CODE_RUNTIME_BASE_PREBUILT,
+    ),
     cliBin:
       process.env.ARCHESTRA_DAGGER_RUNTIME_CLI_BIN ||
       process.env.ARCHESTRA_CODE_RUNTIME_DAGGER_CLI_BIN ||

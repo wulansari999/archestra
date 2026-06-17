@@ -18,6 +18,7 @@ import config, {
   getTrustedOrigins,
   parseActiveChatRunPollIntervalMs,
   parseAuditLogRetentionDays,
+  parseBasePrebuilt,
   parseBlobStorageProvider,
   parseBodyLimit,
   parseCodeRuntimeDaggerRunnerHost,
@@ -848,6 +849,32 @@ describe("parseDatabasePoolMax", () => {
     expect(logger.warn).toHaveBeenCalledWith(
       'Invalid ARCHESTRA_DATABASE_POOL_MAX value "501", using default 50',
     );
+  });
+});
+
+describe("parseBasePrebuilt", () => {
+  test("should default to true when unset", () => {
+    expect(parseBasePrebuilt(undefined)).toBe(true);
+  });
+
+  test("should default to true for empty or whitespace-only value", () => {
+    expect(parseBasePrebuilt("")).toBe(true);
+    expect(parseBasePrebuilt("   ")).toBe(true);
+  });
+
+  test("should be true only for an exact 'true'", () => {
+    expect(parseBasePrebuilt("true")).toBe(true);
+    expect(parseBasePrebuilt("  true  ")).toBe(true);
+  });
+
+  test("should be false for 'false'", () => {
+    expect(parseBasePrebuilt("false")).toBe(false);
+  });
+
+  test("should be false for any other explicit value", () => {
+    expect(parseBasePrebuilt("1")).toBe(false);
+    expect(parseBasePrebuilt("True")).toBe(false);
+    expect(parseBasePrebuilt("yes")).toBe(false);
   });
 });
 
