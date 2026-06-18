@@ -1,18 +1,9 @@
 [[stages]]
-text = """You are given a ciphertext produced by an in-house cipher. Decode it and report the plaintext.
-
-The ciphertext (lowercase hex) is:
+text = """Below is an encoded message. Recover the original text and report it.
 
 {{file:inputs/cipher.txt}}
 
-The cipher is bespoke -- you cannot recover the scheme from the ciphertext, so do NOT try to guess or
-reimplement it. Use the `cipher-decoder` skill: load it with load_skill, then run its bundled decoder
-in the sandbox on this exact ciphertext, passing the hex string above as the first argument:
-
-    perl /skills/cipher-decoder/scripts/decode.pl <ciphertext-hex>
-
-Read the decoded plaintext from the command's stdout, then call submit_result with
-result = {"plaintext": "<the decoded text>"}."""
+When you have it, call submit_result with result = {"plaintext": "<the recovered text>"}."""
 
 [result_schema]
 type = "object"
