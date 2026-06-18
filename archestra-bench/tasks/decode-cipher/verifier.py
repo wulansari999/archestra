@@ -9,6 +9,7 @@ path, or the path without the ciphertext argument, does not count.
 
 import json
 import os
+import shlex
 from pathlib import Path
 
 MOUNT = "/skills/cipher-decoder"
@@ -27,9 +28,24 @@ def _fixture_text(relpath: str) -> str:
     return Path(base, relpath).read_text(encoding="utf-8")
 
 
-def _run_command_text(call: dict) -> str:
+def _ran_decoder_on_ciphertext(call: dict, ciphertext: str) -> bool:
+    if call.get("name") != "archestra__run_command":
+        return False
     inp = call.get("input") or {}
-    return " ".join(str(inp.get(field) or "") for field in ("command", "cwd"))
+    try:
+        argv = shlex.split(str(inp.get("command") or ""))
+    except ValueError:
+        return False
+    if not argv or os.path.basename(argv[0]) != "perl":
+        return False
+    scripts = [a for a in argv[1:] if os.path.basename(a) == SCRIPT]
+    if not scripts:
+        return False
+    script = scripts[0]
+    cwd = str(inp.get("cwd") or "")
+    mounted = script.startswith(MOUNT) or (not script.startswith("/") and MOUNT in cwd)
+    # the ciphertext must be a real argv token (passed to the script), not merely echoed in the text
+    return mounted and ciphertext in argv
 
 
 def test_plaintext_matches() -> None:
@@ -38,20 +54,22 @@ def test_plaintext_matches() -> None:
     assert submitted == expected, f"submitted plaintext {submitted!r} != expected {expected!r}"
 
 
+def test_skill_loaded() -> None:
+    calls = _load_json("BENCH_STATE").get("tool_calls", [])
+    loaded = [
+        c for c in calls
+        if c.get("name") == "archestra__load_skill" and "cipher-decoder" in json.dumps(c.get("input") or {})
+    ]
+    assert loaded, "no load_skill call for cipher-decoder; the skill was not loaded"
+
+
 def test_decoder_script_ran_on_ciphertext() -> None:
     state = _load_json("BENCH_STATE")
     ciphertext = _fixture_text("inputs/cipher.txt").strip()
-    ran = [
-        call
-        for call in state.get("tool_calls", [])
-        if call.get("name") == "archestra__run_command"
-        and MOUNT in (text := _run_command_text(call))
-        and SCRIPT in text
-        and ciphertext in text  # the script was run *on the ciphertext*, not merely inspected
-    ]
+    ran = [c for c in state.get("tool_calls", []) if _ran_decoder_on_ciphertext(c, ciphertext)]
     assert ran, (
-        f"no run_command invoked {MOUNT}/.../{SCRIPT} with the ciphertext as an argument; "
-        "the bundled decoder was not executed on the blob"
+        f"no run_command invoked `perl {MOUNT}/.../{SCRIPT} <ciphertext>` with the ciphertext as an "
+        "argument; the bundled decoder was not executed on the blob"
     )
 
 

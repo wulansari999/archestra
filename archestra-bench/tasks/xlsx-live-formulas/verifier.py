@@ -43,8 +43,9 @@ def _sales() -> list[dict]:
 def _workbook():
     path = os.environ.get("BENCH_OUTPUT")
     assert path, "BENCH_OUTPUT is not set -- the agent did not export a workbook"
-    ws = openpyxl.load_workbook(path, data_only=False).active
-    return ws
+    wb = openpyxl.load_workbook(path, data_only=False)
+    assert len(wb.worksheets) == 1, f"expected a single-worksheet workbook, got {len(wb.worksheets)}"
+    return wb.active
 
 
 # === formula normalization ===
@@ -91,13 +92,13 @@ def _split_top_level(text: str) -> list[str]:
     return args
 
 
-def _product_operands(formula, sheet_title: str) -> set[str]:
+def _product_operands(formula, sheet_title: str) -> list[str]:
     assert isinstance(formula, str) and formula.startswith("="), (
         f"expected a live formula, got {formula!r} (a hardcoded value fails)"
     )
     body = formula[1:]
     assert "(" not in body and ")" not in body, f"unexpected call in bonus formula: {formula!r}"
-    return {_norm_ref(p, sheet_title) for p in body.split("*")}
+    return [_norm_ref(p, sheet_title) for p in body.split("*")]
 
 
 def _parse_sumif(formula, sheet_title: str) -> tuple[str, str, str]:
@@ -109,13 +110,6 @@ def _parse_sumif(formula, sheet_title: str) -> tuple[str, str, str]:
     args = _split_top_level(f[len("=SUMIF(") : -1])
     assert len(args) == 3, f"SUMIF needs 3 args: {formula!r}"
     return _norm_range(args[0], sheet_title), args[1].strip(), _norm_range(args[2], sheet_title)
-
-
-def _resolve_criterion(crit: str, ws, sheet_title: str):
-    crit = crit.strip()
-    if len(crit) >= 2 and crit[0] == '"' and crit[-1] == '"':
-        return crit[1:-1]
-    return ws[_norm_ref(crit, sheet_title)].value
 
 
 # === checks ===
@@ -143,15 +137,16 @@ def test_skill_loaded_and_read() -> None:
     read = [
         c for c in calls
         if c.get("name") == "archestra__run_command"
-        and SKILL_MOUNT in " ".join(str((c.get("input") or {}).get(k) or "") for k in ("command", "cwd"))
+        and SKILL_MOUNT in (text := " ".join(str((c.get("input") or {}).get(k) or "") for k in ("command", "cwd")))
+        and "ledger.xlsx" in text
     ]
-    assert read, f"no run_command referenced the mounted {SKILL_MOUNT}; the ledger was not read"
+    assert read, f"no run_command read {SKILL_MOUNT}/assets/ledger.xlsx; the ledger was not read"
 
 
 def test_data_fidelity() -> None:
     ws, sales = _workbook(), _sales()
-    header = [ws.cell(row=1, column=c).value for c in range(1, 7)]
-    assert header == HEADER[:6], f"header A1:F1 must be {HEADER[:6]}, got {header}"
+    header = [ws.cell(row=1, column=c).value for c in range(1, 8)]
+    assert header == HEADER, f"header A1:G1 must be {HEADER}, got {header}"
     for idx, row in enumerate(sales):
         r = FIRST_DATA_ROW + idx
         got = {
@@ -178,7 +173,7 @@ def test_bonus_formulas() -> None:
     for idx in range(len(sales)):
         r = FIRST_DATA_ROW + idx
         operands = _product_operands(ws.cell(row=r, column=7).value, title)
-        assert operands == {f"D{r}", f"E{r}", f"F{r}"}, (
+        assert sorted(operands) == sorted([f"D{r}", f"E{r}", f"F{r}"]), (
             f"bonus G{r} must be =D{r}*E{r}*F{r} (units*unit_price*commission_pct), got operands {operands}"
         )
 
@@ -199,8 +194,10 @@ def test_team_summary_formulas() -> None:
         rng1, crit, rng2 = _parse_sumif(formula, title)
         assert rng1 == f"C{FIRST_DATA_ROW}:C{last}", f"SUMIF range1 must be C{FIRST_DATA_ROW}:C{last}, got {rng1}"
         assert rng2 == f"G{FIRST_DATA_ROW}:G{last}", f"SUMIF range2 must be G{FIRST_DATA_ROW}:G{last}, got {rng2}"
-        resolved = _resolve_criterion(crit, ws, title)
-        assert resolved == label, f"row {row} SUMIF criterion {resolved!r} must match its team label {label!r}"
+        crit_ref = _norm_ref(crit, title)  # rejects a quoted string literal; criterion must be a cell ref
+        assert crit_ref == f"I{row}", (
+            f"row {row} SUMIF criterion must reference its team cell I{row}, got {crit!r}"
+        )
         seen.append(label)
         row += 1
 
