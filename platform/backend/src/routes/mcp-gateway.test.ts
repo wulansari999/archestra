@@ -1,19 +1,38 @@
 import {
+  getArchestraToolFullName,
   MCP_APPS_EXTENSION_ID,
   MCP_ENTERPRISE_AUTH_EXTENSION_ID,
   TOOL_API_FULL_NAME,
   TOOL_ARTIFACT_WRITE_FULL_NAME,
+  TOOL_CREATE_APP_SHORT_NAME,
+  TOOL_DOWNLOAD_FILE_FULL_NAME,
+  TOOL_EDIT_APP_SHORT_NAME,
   TOOL_INVOCATION_APPROVAL_REQUIRED_AUTONOMOUS_REASON,
+  TOOL_LIST_APPS_SHORT_NAME,
+  TOOL_LIST_SKILLS_FULL_NAME,
+  TOOL_LOAD_SKILL_FULL_NAME,
+  TOOL_READ_APP_SHORT_NAME,
+  TOOL_RENDER_APP_SHORT_NAME,
+  TOOL_RUN_COMMAND_FULL_NAME,
   TOOL_RUN_TOOL_FULL_NAME,
+  TOOL_SAVE_RESULT_FULL_NAME,
+  TOOL_SEARCH_FILES_FULL_NAME,
   TOOL_SEARCH_TOOLS_FULL_NAME,
-} from "@shared";
+  TOOL_UPDATE_APP_SHORT_NAME,
+  TOOL_UPLOAD_FILE_FULL_NAME,
+} from "@archestra/shared";
 import Fastify, { type FastifyInstance } from "fastify";
 import {
   serializerCompiler,
   validatorCompiler,
   type ZodTypeProvider,
 } from "fastify-type-provider-zod";
-import { OrganizationModel, TeamTokenModel, ToolModel } from "@/models";
+import {
+  OrganizationModel,
+  TeamTokenModel,
+  ToolModel,
+  UserTokenModel,
+} from "@/models";
 import { afterEach, beforeEach, describe, expect, test } from "@/test";
 import mcpGatewayRoutes from "./mcp-gateway";
 
@@ -1027,7 +1046,7 @@ describe("MCP Gateway (stateless mode)", () => {
     expect(text).toContain("Blocked for this team");
   });
 
-  test("hides directly assigned tools except api from tools/list when toolExposureMode is search_and_run_only", async ({
+  test("keeps only meta, always-exposed, and api tools in tools/list when toolExposureMode is search_and_run_only", async ({
     makeAgent,
     makeOrganization,
     seedAndAssignArchestraTools,
@@ -1080,16 +1099,107 @@ describe("MCP Gateway (stateless mode)", () => {
     const toolNames = response
       .json()
       .result.tools.map((tool: { name: string }) => tool.name);
-    // api stays exposed because run_tool refuses to dispatch it, so it must be
-    // directly callable for its invocation policy to fire.
+    // api stays exposed at top level (the platform-management entrypoint is kept
+    // directly discoverable rather than hidden behind search_tools); the
+    // always-exposed skill tools and the meta tools round out the list.
     expect(toolNames.sort()).toEqual(
       [
         TOOL_API_FULL_NAME,
+        TOOL_LIST_SKILLS_FULL_NAME,
+        TOOL_LOAD_SKILL_FULL_NAME,
         TOOL_RUN_TOOL_FULL_NAME,
         TOOL_SEARCH_TOOLS_FULL_NAME,
       ].sort(),
     );
     expect(toolNames).not.toContain(TOOL_ARTIFACT_WRITE_FULL_NAME);
+  });
+
+  test("also keeps sandbox runtime and app tools top-level in tools/list when their features are enabled", async ({
+    makeAgent,
+    makeMember,
+    makeOrganization,
+    makeUser,
+    seedAndAssignArchestraTools,
+  }) => {
+    const config = (await import("@/config")).default;
+    const originalSandboxEnabled = config.skillsSandbox.enabled;
+    const originalAppsEnabled = config.apps.enabled;
+    (config.skillsSandbox as { enabled: boolean }).enabled = true;
+    (config.apps as { enabled: boolean }).enabled = true;
+
+    try {
+      const org = await makeOrganization();
+      // sandbox tools are gated by sandbox:execute — authenticate as an admin so
+      // RBAC does not strip them before exposure filtering runs.
+      const adminUser = await makeUser();
+      await makeMember(adminUser.id, org.id, { role: "admin" });
+      const agent = await makeAgent({
+        organizationId: org.id,
+        agentType: "mcp_gateway",
+        toolExposureMode: "search_and_run_only",
+      });
+      await seedAndAssignArchestraTools(agent.id);
+
+      const token = await UserTokenModel.create(adminUser.id, org.id);
+
+      const initResponse = await app.inject({
+        method: "POST",
+        url: `/v1/mcp/${agent.id}`,
+        headers: makeMcpHeaders(token.value),
+        payload: {
+          jsonrpc: "2.0",
+          method: "initialize",
+          params: {
+            protocolVersion: "2024-11-05",
+            capabilities: {},
+            clientInfo: { name: "test-client", version: "1.0.0" },
+          },
+          id: 1,
+        },
+      });
+      expect(initResponse.statusCode).toBe(200);
+
+      const response = await app.inject({
+        method: "POST",
+        url: `/v1/mcp/${agent.id}`,
+        headers: makeMcpHeaders(token.value),
+        payload: {
+          jsonrpc: "2.0",
+          method: "tools/list",
+          params: {},
+          id: 2,
+        },
+      });
+
+      expect(response.statusCode).toBe(200);
+      const toolNames = response
+        .json()
+        .result.tools.map((tool: { name: string }) => tool.name);
+      expect(toolNames.sort()).toEqual(
+        [
+          TOOL_API_FULL_NAME,
+          TOOL_DOWNLOAD_FILE_FULL_NAME,
+          TOOL_LIST_SKILLS_FULL_NAME,
+          TOOL_LOAD_SKILL_FULL_NAME,
+          TOOL_RUN_COMMAND_FULL_NAME,
+          TOOL_RUN_TOOL_FULL_NAME,
+          TOOL_SAVE_RESULT_FULL_NAME,
+          TOOL_SEARCH_FILES_FULL_NAME,
+          TOOL_SEARCH_TOOLS_FULL_NAME,
+          TOOL_UPLOAD_FILE_FULL_NAME,
+          getArchestraToolFullName(TOOL_CREATE_APP_SHORT_NAME),
+          getArchestraToolFullName(TOOL_UPDATE_APP_SHORT_NAME),
+          getArchestraToolFullName(TOOL_EDIT_APP_SHORT_NAME),
+          getArchestraToolFullName(TOOL_READ_APP_SHORT_NAME),
+          getArchestraToolFullName(TOOL_RENDER_APP_SHORT_NAME),
+          getArchestraToolFullName(TOOL_LIST_APPS_SHORT_NAME),
+        ].sort(),
+      );
+    } finally {
+      (config.skillsSandbox as { enabled: boolean }).enabled =
+        originalSandboxEnabled;
+      (config.apps as { enabled: boolean }).enabled = originalAppsEnabled;
+    }
   });
 
   test("exposes implicit search_tools and run_tool without manual assignment when toolExposureMode is search_and_run_only", async ({

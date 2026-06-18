@@ -6,6 +6,7 @@ import {
   getArchestraToolFullName,
   getArchestraToolPrefix,
   getArchestraToolShortName,
+  isAlwaysExposedArchestraToolShortName,
   isArchestraMcpServerTool,
   TOOL_API_FULL_NAME,
 } from "./archestra-mcp-server";
@@ -76,5 +77,55 @@ describe("archestra MCP tool names", () => {
     expect(isArchestraMcpServerTool("github__list_issues")).toBe(false);
     expect(isAgentTool(`${AGENT_TOOL_PREFIX}delegate_me`)).toBe(true);
     expect(isAgentTool("archestra__whoami")).toBe(false);
+  });
+
+  test("flags the skill, sandbox, and app runtime path as always-exposed", () => {
+    for (const shortName of [
+      "list_skills",
+      "load_skill",
+      "run_command",
+      "download_file",
+      "upload_file",
+      "create_app",
+      "update_app",
+      "edit_app",
+      "read_app",
+      "render_app",
+      "list_apps",
+    ]) {
+      expect(isAlwaysExposedArchestraToolShortName(shortName)).toBe(true);
+    }
+    // delete_app stays search-gated (destructive); preview_app_tool and
+    // get_app_diagnostics are follow-up steps reached via run_tool.
+    for (const shortName of [
+      "delete_app",
+      "preview_app_tool",
+      "get_app_diagnostics",
+    ]) {
+      expect(isAlwaysExposedArchestraToolShortName(shortName)).toBe(false);
+    }
+  });
+
+  test("recognizes always-exposed tools through a white-label prefix", () => {
+    const branding = { appName: "Acme Control Plane", fullWhiteLabeling: true };
+    const brandedLoad = getArchestraToolFullName("load_skill", branding);
+    const shortName = getArchestraToolShortName(brandedLoad, branding);
+
+    expect(shortName).toBe("load_skill");
+    expect(
+      shortName !== null && isAlwaysExposedArchestraToolShortName(shortName),
+    ).toBe(true);
+  });
+
+  test("does not flag skill-authoring or unrelated tools", () => {
+    for (const shortName of [
+      "create_skill",
+      "update_skill",
+      "whoami",
+      "search_tools",
+      "run_tool",
+    ]) {
+      expect(isAlwaysExposedArchestraToolShortName(shortName)).toBe(false);
+    }
   });
 });

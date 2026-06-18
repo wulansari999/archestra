@@ -11,9 +11,11 @@ import { LinearConnector } from "./linear/linear-connector";
 import { NotionConnector } from "./notion/notion-connector";
 import { OneDriveConnector } from "./onedrive/onedrive-connector";
 import { OutlineConnector } from "./outline/outline-connector";
+import { PerforceConnector } from "./perforce/perforce-connector";
 import { SalesforceConnector } from "./salesforce/salesforce-connector";
 import { ServiceNowConnector } from "./servicenow/servicenow-connector";
 import { SharePointConnector } from "./sharepoint/sharepoint-connector";
+import { WebCrawlerConnector } from "./web-crawler/web-crawler-connector";
 
 const connectorRegistry: Record<ConnectorType, () => Connector> = {
   jira: () => new JiraConnector(),
@@ -31,6 +33,8 @@ const connectorRegistry: Record<ConnectorType, () => Connector> = {
   asana: () => new AsanaConnector(),
   linear: () => new LinearConnector(),
   salesforce: () => new SalesforceConnector(),
+  web_crawler: () => new WebCrawlerConnector(),
+  perforce: () => new PerforceConnector(),
 };
 
 export function getConnector(type: string): Connector {

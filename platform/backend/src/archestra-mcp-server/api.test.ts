@@ -1,4 +1,4 @@
-import { TOOL_API_FULL_NAME } from "@shared";
+import { TOOL_API_FULL_NAME } from "@archestra/shared";
 import { describe, expect, test } from "@/test";
 import { executeArchestraTool } from ".";
 import type { ArchestraContext } from "./types";

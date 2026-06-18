@@ -67,28 +67,15 @@ false
 {{/*
 Environment variables for the Archestra Platform container
 */}}
-{{- define "archestra-platform.env" -}}
-{{/*
-List of sensitive environment variables that should be stored in the Secret
-and referenced via secretKeyRef instead of being exposed as plaintext in Pod specs.
-This must match the list in secret.yaml.
-Additionally, any env var matching ARCHESTRA_CHAT_*_API_KEY is treated as sensitive.
-*/}}
-{{- $sensitiveEnvVars := list
-  "ARCHESTRA_AUTH_SECRET"
-  "ARCHESTRA_AUTH_ADMIN_PASSWORD"
-  "ARCHESTRA_OTEL_EXPORTER_OTLP_AUTH_PASSWORD"
-  "ARCHESTRA_OTEL_EXPORTER_OTLP_AUTH_BEARER"
-  "ARCHESTRA_METRICS_SECRET"
-  "ARCHESTRA_HASHICORP_VAULT_TOKEN"
-}}
+{{- define "archestra-platform.databaseEnv" -}}
+{{- $databaseSecretName := .migrationDatabaseSecretNameOverride | default (include "archestra-platform.authSecretName" .) -}}
 {{- if eq (toString .Values.postgresql.external_database_url) "from_vault" }}
 {{/* Database URL provided by vault-secrets init container — no env var generated */}}
 {{- else if .Values.postgresql.external_database_url }}
 - name: ARCHESTRA_DATABASE_URL
   valueFrom:
     secretKeyRef:
-      name: {{ include "archestra-platform.authSecretName" . }}
+      name: {{ $databaseSecretName }}
       key: database-url
 {{- else if .Values.postgresql.enabled }}
 {{/*
@@ -104,6 +91,24 @@ The Bitnami chart auto-generates a strong password and persists it across helm u
 - name: ARCHESTRA_DATABASE_URL
   value: postgresql://{{ .Values.postgresql.auth.username }}:$(PGPASSWORD)@{{ include "archestra-platform.fullname" . }}-postgresql:5432/{{ .Values.postgresql.auth.database }}
 {{- end }}
+{{- end }}
+
+{{- define "archestra-platform.env" -}}
+{{/*
+List of sensitive environment variables that should be stored in the Secret
+and referenced via secretKeyRef instead of being exposed as plaintext in Pod specs.
+This must match the list in secret.yaml.
+Additionally, any env var matching ARCHESTRA_CHAT_*_API_KEY is treated as sensitive.
+*/}}
+{{- $sensitiveEnvVars := list
+  "ARCHESTRA_AUTH_SECRET"
+  "ARCHESTRA_AUTH_ADMIN_PASSWORD"
+  "ARCHESTRA_OTEL_EXPORTER_OTLP_AUTH_PASSWORD"
+  "ARCHESTRA_OTEL_EXPORTER_OTLP_AUTH_BEARER"
+  "ARCHESTRA_METRICS_SECRET"
+  "ARCHESTRA_HASHICORP_VAULT_TOKEN"
+}}
+{{- include "archestra-platform.databaseEnv" . }}
 {{/*
 When both external_database_url is null and postgresql.enabled is false,
 ARCHESTRA_DATABASE_URL is not set here. Use archestra.envFromSecrets to inject it from a pre-existing K8s secret.
@@ -149,18 +154,6 @@ If ARCHESTRA_AUTH_SECRET env variable is explicitly set, it will override the au
 {{- if not (hasKey .Values.archestra.env "ARCHESTRA_CODE_RUNTIME_DAGGER_RUNNER_HOST") }}
 - name: ARCHESTRA_CODE_RUNTIME_DAGGER_RUNNER_HOST
   value: {{ include "archestra-platform.codeRuntimeDaggerRunnerHost" . | quote }}
-{{- end }}
-{{- if not (hasKey .Values.archestra.env "ARCHESTRA_CODE_RUNTIME_TIMEOUT_SECONDS") }}
-- name: ARCHESTRA_CODE_RUNTIME_TIMEOUT_SECONDS
-  value: {{ .Values.archestra.codeRuntime.timeoutSeconds | quote }}
-{{- end }}
-{{- if not (hasKey .Values.archestra.env "ARCHESTRA_CODE_RUNTIME_MAX_CONCURRENT") }}
-- name: ARCHESTRA_CODE_RUNTIME_MAX_CONCURRENT
-  value: {{ .Values.archestra.codeRuntime.maxConcurrent | quote }}
-{{- end }}
-{{- if not (hasKey .Values.archestra.env "ARCHESTRA_CODE_RUNTIME_MAX_OUTPUT_BYTES") }}
-- name: ARCHESTRA_CODE_RUNTIME_MAX_OUTPUT_BYTES
-  value: {{ .Values.archestra.codeRuntime.maxOutputBytes | quote }}
 {{- end }}
 {{- end }}
 {{- if .Values.archestra.diagnostics.enabled }}
@@ -255,6 +248,13 @@ Auth secret name for the Archestra Platform
 {{- end }}
 
 {{/*
+Hook-only auth secret name for the database migration Job.
+*/}}
+{{- define "archestra-platform.migrationJobAuthSecretName" -}}
+{{- printf "%s-migrate-auth" (include "archestra-platform.fullname" .) -}}
+{{- end }}
+
+{{/*
 Auth secret key for the Archestra Platform
 */}}
 {{- define "archestra-platform.authSecretKey" -}}
@@ -284,7 +284,9 @@ ServiceAccount name for the Archestra Platform
 
 {{/*
 RBAC rules granting the platform ServiceAccount the permissions it needs to
-manage MCP server workloads in a namespace. Shared by the release-namespace Role
+manage MCP server workloads AND the per-environment Dagger sandbox engine
+(StatefulSet + engine-config ConfigMap + egress NetworkPolicy, reached via
+pods/exec + pods/attach) in a namespace. Shared by the release-namespace Role
 and the per-namespace Roles generated from rbac.environmentNamespaces, so both
 grant exactly the same access (no drift).
 */}}
@@ -307,8 +309,13 @@ grant exactly the same access (no drift).
 - apiGroups: [""]
   resources: ["secrets"]
   verbs: ["get", "list", "create", "update", "patch", "delete", "watch"]
+# ConfigMaps for the per-environment Dagger engine config (engine.json).
+- apiGroups: [""]
+  resources: ["configmaps"]
+  verbs: ["get", "list", "create", "update", "patch", "delete", "watch"]
+# Deployments for MCP servers; StatefulSets for the per-environment Dagger engine.
 - apiGroups: ["apps"]
-  resources: ["deployments"]
+  resources: ["deployments", "statefulsets"]
   verbs: ["get", "list", "create", "update", "patch", "delete", "watch"]
 # Standard Kubernetes NetworkPolicy for IP/CIDR egress rules.
 - apiGroups: ["networking.k8s.io"]
@@ -353,9 +360,8 @@ app.kubernetes.io/part-of: archestra
 {{/*
 Database migration Job labels.
 
-Mirrors the worker label scheme: the `app.kubernetes.io/name` is suffixed with
-`-migrate` so the platform Service (which selects on the unsuffixed name) never
-routes traffic to the short-lived migration pod.
+The name label is suffixed with `-migrate` so the platform Service selector
+never routes traffic to the short-lived migration pod.
 */}}
 {{- define "archestra-platform.migrationJobLabels" -}}
 helm.sh/chart: {{ include "archestra-platform.chart" . }}
@@ -476,19 +482,10 @@ Handles Vault secret injection, pgvector extension setup, and PostgreSQL readine
 
 {{/*
 Worker-only init container that blocks worker startup until the web Deployment
-has applied database migrations, by waiting for the platform Service to accept
-connections on port 9000 (the web pod only listens after running migrations and
-seeding required data).
+has applied database migrations.
 
-This is reliable on a *fresh install*: no previous web pods exist, so Service
-reachability can only mean this release's migrations have completed. On an
-*upgrade* the Service still routes to the previous revision's web pods, so this
-check alone would let new worker pods start before the new migrations run --
-that case is covered instead by the pre-upgrade migration Job (migration-job.yaml).
-
-Without any gate the worker boots in parallel with migrations, queries tables
-that do not exist yet (e.g. "organization"), crashes, and only recovers on a
-pod restart.
+This is reliable on fresh installs, where no previous web pods exist. Upgrades
+are covered by the pre-upgrade migration Job.
 */}}
 {{- define "archestra-platform.waitForMigrationsInitContainer" -}}
 {{- if .Values.archestra.initContainers.waitForMigrations.enabled }}

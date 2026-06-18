@@ -5,7 +5,7 @@ import {
   type ArchestraToolShortName,
   DEFAULT_ARCHESTRA_TOOL_NAMES,
   getArchestraToolShortName,
-} from "@shared";
+} from "@archestra/shared";
 import { getArchestraMcpTools } from "@/archestra-mcp-server";
 import { toolShortNames as knowledgeManagementToolShortNames } from "@/archestra-mcp-server/knowledge-management";
 import { TOOL_PERMISSIONS } from "@/archestra-mcp-server/rbac";
@@ -26,6 +26,7 @@ enum ToolGroup {
   CodeExecution = "Code Execution",
   Skills = "Skills",
   SkillSandbox = "Skill Sandbox",
+  Apps = "Apps",
 }
 
 const groupOrder: Record<ToolGroup, number> = {
@@ -36,6 +37,7 @@ const groupOrder: Record<ToolGroup, number> = {
   [ToolGroup.CodeExecution]: 4,
   [ToolGroup.Skills]: 5,
   [ToolGroup.SkillSandbox]: 6,
+  [ToolGroup.Apps]: 7,
 };
 
 /**
@@ -74,16 +76,31 @@ const toolGroups: Record<ArchestraToolShortName, ToolGroup> = {
   search_tools: ToolGroup.Meta,
   run_tool: ToolGroup.Meta,
 
-  run_python: ToolGroup.CodeExecution,
   list_skills: ToolGroup.Skills,
-  activate_skill: ToolGroup.Skills,
-  read_skill_file: ToolGroup.Skills,
+  load_skill: ToolGroup.Skills,
   create_skill: ToolGroup.Skills,
   update_skill: ToolGroup.Skills,
 
-  create_skill_sandbox: ToolGroup.SkillSandbox,
-  run_skill_command: ToolGroup.SkillSandbox,
-  get_skill_sandbox_artifact: ToolGroup.SkillSandbox,
+  run_command: ToolGroup.SkillSandbox,
+  download_file: ToolGroup.SkillSandbox,
+  upload_file: ToolGroup.SkillSandbox,
+  search_files: ToolGroup.SkillSandbox,
+  save_result: ToolGroup.SkillSandbox,
+
+  create_app: ToolGroup.Apps,
+  list_apps: ToolGroup.Apps,
+  render_app: ToolGroup.Apps,
+  read_app: ToolGroup.Apps,
+  update_app: ToolGroup.Apps,
+  edit_app: ToolGroup.Apps,
+  delete_app: ToolGroup.Apps,
+  preview_app_tool: ToolGroup.Apps,
+  get_app_diagnostics: ToolGroup.Apps,
+  app_data_get: ToolGroup.Apps,
+  app_data_set: ToolGroup.Apps,
+  app_data_list: ToolGroup.Apps,
+  app_data_delete: ToolGroup.Apps,
+  llm_complete: ToolGroup.Apps,
 };
 
 // === Script entry point ===
@@ -238,11 +255,11 @@ Most tools require explicit assignment to Agents or MCP Gateways before they can
 
 Additionally, ${formatToolLink("query_knowledge_sources")} is automatically assigned to Agents and MCP Gateways that have at least one [knowledge base](/platform-knowledge-bases) or [knowledge connector](/platform-knowledge-connectors) attached. To use it, the user must have ${queryKnowledgeSourcesPermission}.
 
-All Archestra tools are prefixed with \`archestra__\` and are always trusted — they bypass tool invocation and trusted data policies.
+All Archestra tools are prefixed with \`archestra__\` and are always trusted — they bypass tool invocation and trusted data policies. The one exception is ${formatToolLink("api")}, which stays subject to tool invocation policies (a default policy requires human approval for any non-GET request).
 
 ## Auth
 
-Archestra tools are **trusted**, meaning they bypass [tool invocation policies](/platform-tool-invocation-policies) and [trusted data policies](/platform-trusted-data-policies) — the tool will always execute without policy evaluation.
+Archestra tools are **trusted**, meaning they bypass [tool invocation policies](/platform-tool-invocation-policies) and [trusted data policies](/platform-trusted-data-policies) — the tool will always execute without policy evaluation. The sole exception is ${formatToolLink("api")}: it does **not** bypass tool invocation policies, so an admin's policies (including the default require-approval-on-write policy) are enforced on it.
 
 However, **RBAC (role-based access control) is still enforced**. Every tool is mapped to a required permission (resource + action). The \`tools/list\` endpoint dynamically filters tools so users only see tools they have permission to use. For example, a user without \`knowledgeSource:create\` permission will not see ${formatToolLink("create_knowledge_base")} in their tool list and cannot execute it.
 

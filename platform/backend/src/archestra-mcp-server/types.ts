@@ -8,7 +8,18 @@ export interface ArchestraContext {
     id: string;
     name: string;
   };
+  /**
+   * Id of a persisted `conversations` row. Only ever a real conversation id —
+   * tools may persist it as a foreign key. Absent in headless executions
+   * (direct A2A, ChatOps, schedule triggers, incoming email).
+   */
   conversationId?: string;
+  /**
+   * Opaque key scoping per-execution state (browser tabs, MCP client cache,
+   * headless sandboxes). Equals `conversationId` in UI chat; a generated UUID
+   * in headless executions. Never persist it as a conversation id.
+   */
+  isolationKey?: string;
   /** ChatOps channel binding ID for Slack/MS Teams-triggered executions */
   chatOpsBindingId?: string;
   /** ChatOps thread identifier for thread-scoped agent overrides */
@@ -16,6 +27,12 @@ export interface ArchestraContext {
   userId?: string;
   /** The ID of the current internal agent (for agent delegation tool lookup) */
   agentId?: string;
+  /**
+   * The app whose runtime made this call, set ONLY by the app-bound MCP proxy
+   * (`POST /api/mcp/app/:appId`). The App Data Store tools key off this — never
+   * off a tool argument — so an app can only touch its own data store.
+   */
+  appId?: string;
   /** The organization ID */
   organizationId?: string;
   /** Virtual API key ID used for the request */

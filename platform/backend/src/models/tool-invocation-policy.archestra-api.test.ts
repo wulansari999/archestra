@@ -1,4 +1,4 @@
-import { TOOL_API_FULL_NAME, TOOL_WHOAMI_FULL_NAME } from "@shared";
+import { TOOL_API_FULL_NAME, TOOL_WHOAMI_FULL_NAME } from "@archestra/shared";
 import { ToolInvocationPolicyModel } from "@/models";
 import { describe, expect, test } from "@/test";
 

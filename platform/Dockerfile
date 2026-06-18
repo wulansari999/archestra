@@ -1,8 +1,8 @@
 # build KinD, Docker CLI, Dagger CLI, and kubectl from source with a patched Go toolchain.
 # the Alpine packages/binaries have historically lagged on Go patch releases, so
 # we compile these tools ourselves to pick up upstream fixes without local vendoring hacks.
-ARG GOLANG_IMAGE=golang:1.25.10-alpine@sha256:8d22e29d960bc50cd025d93d5b7c7d220b1ee9aa7a239b3c8f55a57e987e8d45
-ARG NODE_IMAGE=node:24-alpine3.23@sha256:7fddd9ddeae8196abf4a3ef2de34e11f7b1a722119f91f28ddf1e99dcafdf114
+ARG GOLANG_IMAGE=golang:1.25.11-alpine@sha256:c05ba4b73604069d376c4f41346b05374335b5ca0c46fb6dfede5a59f5196931
+ARG NODE_IMAGE=node:24-alpine3.23@sha256:2bdb65ed1dab192432bc31c95f94155ca5ad7fc1392fb7eb7526ab682fa5bf14
 ARG KIND_VERSION=v0.31.0
 ARG KIND_COMMIT=a323333ff9efd8099f95a8a6b5c86c75a210d00f
 ARG DOCKER_CLI_VERSION=v29.3.0
@@ -31,7 +31,7 @@ COPY docker/dagger-dockercompat /dagger-dockercompat
 RUN git clone --depth 1 --branch "${KIND_VERSION}" https://github.com/kubernetes-sigs/kind.git /kind && \
     test "$(git -C /kind rev-parse HEAD)" = "${KIND_COMMIT}" && \
     cd /kind && \
-    go mod edit -go=1.25.10 && \
+    go mod edit -go=1.25.11 && \
     # golang.org/x/net <0.55.0: CVE-2026-39821 (CRITICAL); fixed in >= 0.55.0
     go get golang.org/x/net@v0.55.0 && \
     CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build -o /kind-binary .
@@ -39,7 +39,7 @@ RUN git clone --depth 1 --branch "${DOCKER_CLI_VERSION}" https://github.com/dock
     test "$(git -C /docker-cli rev-parse HEAD)" = "${DOCKER_CLI_COMMIT}" && \
     cd /docker-cli && \
     cp vendor.mod go.mod && cp vendor.sum go.sum && \
-    go mod edit -go=1.25.10 && \
+    go mod edit -go=1.25.11 && \
     # CVE-2026-33186: grpc Improper Authorization fixed in >= 1.79.3
     go get google.golang.org/grpc@v1.79.3 && \
     # CVE-2026-39883: OTel SDK untrusted search path fixed in >= 1.43.0
@@ -62,7 +62,7 @@ RUN git clone --depth 1 --branch "${DAGGER_VERSION}" https://github.com/dagger/d
     test "$(git -C /dagger rev-parse HEAD)" = "${DAGGER_COMMIT}" && \
     cd /dagger && \
     cp -R /dagger-dockercompat ./dockercompat && \
-    go mod edit -go=1.25.10 && \
+    go mod edit -go=1.25.11 && \
     # cve-2026-34040: replace Dagger's BuildKit Docker monolith imports with split Moby modules.
     go mod edit -require=github.com/docker/docker@v29.3.1+incompatible && \
     go mod edit -replace=github.com/docker/docker=./dockercompat && \
@@ -86,8 +86,8 @@ RUN git clone --depth 1 --branch "${DAGGER_VERSION}" https://github.com/dagger/d
 RUN git clone --depth 1 --branch "${KUBECTL_VERSION}" https://github.com/kubernetes/kubernetes.git /kubernetes && \
     test "$(git -C /kubernetes rev-parse HEAD)" = "${KUBECTL_COMMIT}" && \
     cd /kubernetes && \
-    go mod edit -go=1.25.10 && \
-    go work edit -go=1.25.10 && \
+    go mod edit -go=1.25.11 && \
+    go work edit -go=1.25.11 && \
     # cve-2026-35469: spdystream resource exhaustion fixed in >= 0.5.1.
     go get github.com/moby/spdystream@v0.5.1 && \
     # cve-2026-29181: OTel resource exhaustion fixed in >= 1.41.0.
@@ -98,6 +98,35 @@ RUN git clone --depth 1 --branch "${KUBECTL_VERSION}" https://github.com/kuberne
     -ldflags "-X k8s.io/component-base/version.gitVersion=${KUBECTL_VERSION} -X k8s.io/component-base/version.gitCommit=${KUBECTL_COMMIT} -X k8s.io/component-base/version.gitTreeState=clean" \
     -o /kubectl-binary ./cmd/kubectl
 
+# render the quickstart Dagger Engine manifest from the helm/dagger-runtime chart
+# at build time (offline — the subchart is vendored in charts/). rendering here
+# instead of committing a snapshot keeps it in lockstep with the chart used in
+# prod/dev. laptop-sized resources so the embedded KinD cluster can schedule it;
+# kube-pod:// transport needs no Service/TCP listener.
+FROM ${NODE_IMAGE} AS dagger-manifest
+RUN apk add --no-cache helm
+COPY helm/dagger-runtime /chart/dagger-runtime
+RUN helm template dagger-runtime /chart/dagger-runtime --namespace default \
+        --set networkPolicy.create=false \
+        --set dagger.engine.resources.requests.cpu=500m \
+        --set dagger.engine.resources.requests.memory=2Gi \
+        --set dagger.engine.resources.limits.memory=6Gi \
+        --set dagger.engine.statefulSet.persistentVolumeClaim.resources.requests.storage=20Gi \
+        > /dagger-engine.quickstart.yaml
+
+# pre-bake the Dagger Engine image as a docker-archive so the quickstart can
+# kind-load it into the embedded node instead of pulling ~352MB from the registry
+# on every boot (KinD recreates its node each run and its containerd cannot see
+# the host Docker image cache). tagged to match the engine ref the rendered
+# manifest uses, so imagePullPolicy: IfNotPresent finds it locally.
+FROM ${NODE_IMAGE} AS dagger-engine-image
+ARG TARGETARCH
+ARG DAGGER_VERSION
+RUN apk add --no-cache skopeo
+RUN skopeo copy --override-os linux --override-arch "${TARGETARCH}" \
+        "docker://registry.dagger.io/engine:${DAGGER_VERSION}" \
+        "docker-archive:/dagger-engine.tar:registry.dagger.io/engine:${DAGGER_VERSION}"
+
 FROM ${NODE_IMAGE} AS base
 
 # Enable pnpm
@@ -105,7 +134,7 @@ ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
 RUN corepack enable
 
-RUN corepack prepare pnpm@11.4.0 --activate
+RUN corepack prepare pnpm@11.5.2 --activate
 
 # Dependencies stage
 FROM base AS deps
@@ -118,7 +147,7 @@ COPY backend/package.json backend/
 COPY frontend/package.json frontend/
 COPY shared/package.json shared/
 COPY archestra-rs/sandbox-rs/package.json archestra-rs/sandbox-rs/
-COPY patches/ patches/
+COPY archestra-rs/app-runtime-rs/package.json archestra-rs/app-runtime-rs/
 
 # Install all dependencies
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --frozen-lockfile
@@ -151,6 +180,7 @@ COPY --from=deps /app/backend/node_modules ./backend/node_modules
 COPY --from=deps /app/frontend/node_modules ./frontend/node_modules
 COPY --from=deps /app/shared/node_modules ./shared/node_modules
 COPY --from=deps /app/archestra-rs/sandbox-rs/node_modules ./archestra-rs/sandbox-rs/node_modules
+COPY --from=deps /app/archestra-rs/app-runtime-rs/node_modules ./archestra-rs/app-runtime-rs/node_modules
 
 # Copy source files
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json ./
@@ -160,6 +190,8 @@ COPY shared ./shared
 COPY archestra-rs/Cargo.toml archestra-rs/Cargo.lock ./archestra-rs/
 COPY archestra-rs/sandbox-core ./archestra-rs/sandbox-core
 COPY archestra-rs/sandbox-rs ./archestra-rs/sandbox-rs
+COPY archestra-rs/app-runtime-core ./archestra-rs/app-runtime-core
+COPY archestra-rs/app-runtime-rs ./archestra-rs/app-runtime-rs
 
 # Build the Rust N-API skill sandbox addon during the JS workspace build.
 RUN apk add --no-cache build-base cargo rust
@@ -170,13 +202,15 @@ ENV NEXT_TELEMETRY_DISABLED=1
 # VERSION is exported as env var for child processes (used by Sentry source map upload)
 ENV VERSION=${VERSION}
 
-FROM builder-base AS sandbox-rs-musl-smoke
+FROM builder-base AS rust-napi-musl-smoke
 # cache cargo registry/git + the workspace target dir so heavy deps
 # (dagger-sdk, tokio, …) aren't recompiled on every build of this stage.
+# Smokes every N-API addon under musl: build the .node, then load and call it so
+# a musl-specific loader/linkage regression fails here rather than at runtime.
 RUN --mount=type=cache,target=/root/.cargo/registry \
     --mount=type=cache,target=/root/.cargo/git \
     --mount=type=cache,target=/app/archestra-rs/target \
-    pnpm --filter @archestra/sandbox-rs check:musl
+    pnpm --filter @archestra/sandbox-rs --filter @archestra/app-runtime-rs check:musl
 
 # <----- Builder stage ----->
 FROM builder-base AS builder
@@ -195,7 +229,7 @@ FROM builder-base AS builder
 # Cache cargo registry/git, the Rust workspace target dir, turbo's local cache,
 # and Next.js's build cache so a cold `pnpm build` (which recompiles the Rust
 # N-API addon and builds the frontend) reuses prior work on subsequent builds.
-# The cargo targets match the sandbox-rs-musl-smoke stage above, so that stage
+# The cargo targets match the rust-napi-musl-smoke stage above, so that stage
 # warms the registry for this one; cargo isolates artifacts by target triple.
 RUN --mount=type=cache,target=/root/.cargo/registry \
     --mount=type=cache,target=/root/.cargo/git \
@@ -238,8 +272,10 @@ COPY docker/certs/aws-rds-global-bundle.pem /tmp/aws-rds-ca.pem
 COPY docker/certs/gcloud-sql-global.pem /tmp/gcloud-sql-ca.pem
 
 RUN apk --no-cache upgrade && \
-    # Install PostgreSQL 17, pgvector, and supervisord
-    apk add --no-cache postgresql17 postgresql17-contrib postgresql-pgvector su-exec && \
+    # Install PostgreSQL 17, pgvector, supervisord, and git.
+    # The skill-marketplace clone endpoint needs the git CLI (materialize.ts) and
+    # git-http-backend, the smart-HTTP CGI — which Alpine ships in git-daemon, not git.
+    apk add --no-cache postgresql17 postgresql17-contrib postgresql-pgvector su-exec git git-daemon && \
     # Combine all CA bundles
     cat /tmp/aws-rds-ca.pem /tmp/gcloud-sql-ca.pem > /etc/ssl/certs/cloud-database-ca-bundle.pem && \
     rm -f /tmp/aws-rds-ca.pem /tmp/gcloud-sql-ca.pem && \
@@ -255,13 +291,14 @@ RUN apk --no-cache upgrade && \
     rm -rf /tmp/*
 
 # install KinD (Kubernetes in Docker), docker-cli, and kubectl for Kubernetes runtime support
-# these binaries are built from source in go-builder with Go 1.25.10 to fix CVE-2025-68121
-# and the Go stdlib HIGH CVEs fixed in 1.25.10 (CVE-2026-42499/39836/39820/33814/33811).
+# these binaries are built from source in go-builder with Go 1.25.11 to fix CVE-2025-68121,
+# the Go stdlib HIGH CVEs fixed in 1.25.10 (CVE-2026-42499/39836/39820/33814/33811), and
+# the Go stdlib HIGH CVE fixed in 1.25.11 (CVE-2026-42504).
 COPY --from=go-builder /docker-binary /usr/local/bin/docker
 COPY --from=go-builder /kind-binary /usr/local/bin/kind
 COPY --from=go-builder /kubectl-binary /usr/local/bin/kubectl
 RUN chmod +x /usr/local/bin/kind /usr/local/bin/docker /usr/local/bin/kubectl
-# TODO: Once KinD releases a version compiled with Go >= 1.25.10, remove the kind-builder stage
+# TODO: Once KinD releases a version compiled with Go >= 1.25.11, remove the kind-builder stage
 # at the top of this file and restore the pre-built binary download below for faster builds.
 # Track releases at: https://github.com/kubernetes-sigs/kind/releases
 # RUN ARCH=$(uname -m) && \
@@ -308,9 +345,15 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
 COPY backend/package.json backend/
 COPY frontend/package.json frontend/
 COPY archestra-rs/sandbox-rs/package.json archestra-rs/sandbox-rs/
-COPY patches/ patches/
+COPY archestra-rs/app-runtime-rs/package.json archestra-rs/app-runtime-rs/
 COPY docker/scripts/docker-banner.sh /app/docker-banner.sh
 COPY docker/scripts/docker-entrypoint.sh /docker-entrypoint.sh
+# slim Dagger Engine manifest (rendered in the dagger-manifest stage above)
+# applied into the embedded KinD cluster in quickstart mode; backs the skill
+# sandbox / code runtime (archestra__run_command and friends).
+COPY --from=dagger-manifest /dagger-engine.quickstart.yaml /app/dagger-engine.quickstart.yaml
+# engine image baked in (kind-loaded into the node at boot to avoid a registry pull)
+COPY --from=dagger-engine-image /dagger-engine.tar /app/dagger-engine.tar
 COPY docker/supervisord/supervisord.conf /etc/supervisord.conf
 COPY docker/supervisord/postgres.conf /etc/supervisord.postgres.conf
 
@@ -337,6 +380,9 @@ COPY --from=builder /app/backend/src/database/migrations ./backend/src/database/
 COPY --from=builder /app/archestra-rs/sandbox-rs/index.cjs ./archestra-rs/sandbox-rs/
 COPY --from=builder /app/archestra-rs/sandbox-rs/index.d.ts ./archestra-rs/sandbox-rs/
 COPY --from=builder /app/archestra-rs/sandbox-rs/*.node ./archestra-rs/sandbox-rs/
+COPY --from=builder /app/archestra-rs/app-runtime-rs/index.cjs ./archestra-rs/app-runtime-rs/
+COPY --from=builder /app/archestra-rs/app-runtime-rs/index.d.ts ./archestra-rs/app-runtime-rs/
+COPY --from=builder /app/archestra-rs/app-runtime-rs/*.node ./archestra-rs/app-runtime-rs/
 RUN chmod +x /app/backend/scripts/start-production.sh
 
 # Copy built frontend
@@ -362,6 +408,6 @@ EXPOSE 5432 9000 9050 3000
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD wget --no-verbose --tries=1 --spider http://localhost:3000/ || exit 1
+    CMD wget --no-verbose --tries=1 --spider http://127.0.0.1:3000/ || exit 1
 
 ENTRYPOINT ["/docker-entrypoint.sh"]

@@ -1,0 +1,18 @@
+{
+  "agent_error": "{\"code\":\"unknown\",\"message\":\"An unexpected error occurred. Please try again.\",\"isRetryable\":false,\"originalError\":{\"provider\":\"anthropic\",\"message\":\"Overloaded\",\"raw\":{}},\"sessionId\":\"6b60d37c-1f17-4865-8481-2f2725ee0af5\",\"traceId\":\"69a667296c06f00e15c88220cce8276a\",\"spanId\":\"fffc49db02c7bfb1\"}",
+  "artifacts": {},
+  "chat_api_key_id": "bdc1ba63-51cb-44f4-8b59-b4927ec0698a",
+  "conversation_id": "6b60d37c-1f17-4865-8481-2f2725ee0af5",
+  "finish_reason": "error",
+  "finished_at": "2026-06-11T20:59:49.815178Z",
+  "model": "claude-sonnet-4-6",
+  "model_id": "6e2f1032-92b4-4440-9422-87814133a44c",
+  "output_path": "/home/sandbox/report.json",
+  "started_at": "2026-06-11T20:56:33.503180Z",
+  "task_id": "bike-rebalance",
+  "tool_call_count": 12,
+  "total_tokens": 23201,
+  "verifier_exit_code": null,
+  "verifier_passed": false,
+  "verifier_timed_out": null
+}

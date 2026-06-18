@@ -1,0 +1,62 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.13.1, pytest-8.4.1, pluggy-1.6.0
+rootdir: /var/folders/9m/_xdllzf12lqc6xb2yv748w840000gn/T/skills-eval-verify-mbiwj7j6
+collected 20 items
+
+../../../../../../../var/folders/9m/_xdllzf12lqc6xb2yv748w840000gn/T/skills-eval-verify-mbiwj7j6/test_outputs.py . [  5%]
+..................F                                                      [100%]
+
+=================================== FAILURES ===================================
+_____ TestOptimality.test_objective_is_no_worse_than_gap_limited_benchmark _____
+
+self = <test_outputs.TestOptimality object at 0x109676990>
+report = {'stations': [{'net_bike_change': 13.0, 'net_rebalancing_target': 13.0, 'station_id': 150, 'total_bikes_dropped_off': ...tion_id': 297}, {'bikes_dropped_off': 18.0, 'bikes_picked_up': 0.0, 'load_after_stop': 5.0, 'station_id': 285}], ...}]}
+reconstructed = {'objective': 8.85381943995127, 'station_reports': {150: {'net_bike_change': 13.0, 'net_rebalancing_target': 13.0, 'st...ckup': 0.0}, 251: {'dropoff': 0.0, 'pickup': 3.0}, 265: {'dropoff': 4.0, 'pickup': 0.0}, ...}, 'total_unmet': 5.0, ...}
+benchmark_objective = 8.752281340100705
+
+    def test_objective_is_no_worse_than_gap_limited_benchmark(
+        self,
+        report: dict[str, Any],
+        reconstructed: dict[str, Any],
+        benchmark_objective: float,
+    ) -> None:
+        """
+        Accept any feasible report whose reconstructed objective is no greater
+        than the verifier's SCIP incumbent obtained with a 10% MIP gap limit.
+        """
+        reported = float(report["summary"]["objective"])
+        _assert_close(reported, reconstructed["objective"], "summary.objective", TOL_OBJECTIVE)
+    
+        actual_objective = reconstructed["objective"]
+        allowed = benchmark_objective + max(TOL_OBJECTIVE, 1e-6 * max(1.0, benchmark_objective))
+>       assert actual_objective <= allowed, (
+            f"Objective too high: reconstructed={actual_objective:.6f}, "
+            f"reported={reported:.6f}, 10pct-gap SCIP benchmark={benchmark_objective:.6f}, allowed<={allowed:.6f}"
+        )
+E       AssertionError: Objective too high: reconstructed=8.853819, reported=8.853819, 10pct-gap SCIP benchmark=8.752281, allowed<=8.753281
+E       assert 8.85381943995127 <= 8.753281340100704
+
+/var/folders/9m/_xdllzf12lqc6xb2yv748w840000gn/T/skills-eval-verify-mbiwj7j6/test_outputs.py:774: AssertionError
+==================================== PASSES ====================================
+=========================== short test summary info ============================
+PASSED ../../../../../../../var/folders/9m/_xdllzf12lqc6xb2yv748w840000gn/T/skills-eval-verify-mbiwj7j6/test_outputs.py::TestSchema::test_top_level_fields
+PASSED ../../../../../../../var/folders/9m/_xdllzf12lqc6xb2yv748w840000gn/T/skills-eval-verify-mbiwj7j6/test_outputs.py::TestSchema::test_summary_fields
+PASSED ../../../../../../../var/folders/9m/_xdllzf12lqc6xb2yv748w840000gn/T/skills-eval-verify-mbiwj7j6/test_outputs.py::TestSchema::test_vehicle_entries_and_ids
+PASSED ../../../../../../../var/folders/9m/_xdllzf12lqc6xb2yv748w840000gn/T/skills-eval-verify-mbiwj7j6/test_outputs.py::TestSchema::test_vehicle_fields
+PASSED ../../../../../../../var/folders/9m/_xdllzf12lqc6xb2yv748w840000gn/T/skills-eval-verify-mbiwj7j6/test_outputs.py::TestSchema::test_stop_fields
+PASSED ../../../../../../../var/folders/9m/_xdllzf12lqc6xb2yv748w840000gn/T/skills-eval-verify-mbiwj7j6/test_outputs.py::TestSchema::test_station_entries_and_fields
+PASSED ../../../../../../../var/folders/9m/_xdllzf12lqc6xb2yv748w840000gn/T/skills-eval-verify-mbiwj7j6/test_outputs.py::TestRoutes::test_routes_start_and_end_at_depots
+PASSED ../../../../../../../var/folders/9m/_xdllzf12lqc6xb2yv748w840000gn/T/skills-eval-verify-mbiwj7j6/test_outputs.py::TestRoutes::test_all_route_stations_exist
+PASSED ../../../../../../../var/folders/9m/_xdllzf12lqc6xb2yv748w840000gn/T/skills-eval-verify-mbiwj7j6/test_outputs.py::TestRoutes::test_stops_match_non_depot_route_sequence
+PASSED ../../../../../../../var/folders/9m/_xdllzf12lqc6xb2yv748w840000gn/T/skills-eval-verify-mbiwj7j6/test_outputs.py::TestRoutes::test_no_subtour_or_repeated_station_within_vehicle
+PASSED ../../../../../../../var/folders/9m/_xdllzf12lqc6xb2yv748w840000gn/T/skills-eval-verify-mbiwj7j6/test_outputs.py::TestVehicleBikeFlow::test_load_transitions_match_pickups_and_dropoffs
+PASSED ../../../../../../../var/folders/9m/_xdllzf12lqc6xb2yv748w840000gn/T/skills-eval-verify-mbiwj7j6/test_outputs.py::TestVehicleBikeFlow::test_vehicle_loads_within_capacity
+PASSED ../../../../../../../var/folders/9m/_xdllzf12lqc6xb2yv748w840000gn/T/skills-eval-verify-mbiwj7j6/test_outputs.py::TestVehicleBikeFlow::test_no_over_dropoff_or_capacity_overfill_at_stop
+PASSED ../../../../../../../var/folders/9m/_xdllzf12lqc6xb2yv748w840000gn/T/skills-eval-verify-mbiwj7j6/test_outputs.py::TestStationBalances::test_station_aggregates_match_route_stops
+PASSED ../../../../../../../var/folders/9m/_xdllzf12lqc6xb2yv748w840000gn/T/skills-eval-verify-mbiwj7j6/test_outputs.py::TestStationBalances::test_station_inventory_and_capacity
+PASSED ../../../../../../../var/folders/9m/_xdllzf12lqc6xb2yv748w840000gn/T/skills-eval-verify-mbiwj7j6/test_outputs.py::TestStationBalances::test_station_net_change_and_unmet_amount
+PASSED ../../../../../../../var/folders/9m/_xdllzf12lqc6xb2yv748w840000gn/T/skills-eval-verify-mbiwj7j6/test_outputs.py::TestObjectiveConsistency::test_travel_distance_matches_route_geometry
+PASSED ../../../../../../../var/folders/9m/_xdllzf12lqc6xb2yv748w840000gn/T/skills-eval-verify-mbiwj7j6/test_outputs.py::TestObjectiveConsistency::test_unmet_penalty_matches_station_unmet
+PASSED ../../../../../../../var/folders/9m/_xdllzf12lqc6xb2yv748w840000gn/T/skills-eval-verify-mbiwj7j6/test_outputs.py::TestObjectiveConsistency::test_objective_matches_travel_plus_penalty
+FAILED ../../../../../../../var/folders/9m/_xdllzf12lqc6xb2yv748w840000gn/T/skills-eval-verify-mbiwj7j6/test_outputs.py::TestOptimality::test_objective_is_no_worse_than_gap_limited_benchmark
+=================== 1 failed, 19 passed in 152.93s (0:02:32) ===================

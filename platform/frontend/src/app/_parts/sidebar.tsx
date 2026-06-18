@@ -1,27 +1,29 @@
 "use client";
-import { SignedIn, UserButton } from "@daveyplate/better-auth-ui";
 import {
   COMMUNITY_DOCS_URL,
   COMMUNITY_SLACK_URL,
   E2eTestId,
   GITHUB_REPO_NEW_ISSUE_URL,
   GITHUB_REPO_URL,
-} from "@shared";
-import { requiredPagePermissionsMap } from "@shared/access-control";
+} from "@archestra/shared";
+import { requiredPagePermissionsMap } from "@archestra/shared/access-control";
 import {
+  AppWindow,
   BookOpen,
   Bot,
   Bug,
   Cable,
   Database,
+  FolderKanban,
+  FolderOpen,
   Github,
   type LucideIcon,
   MessageCircle,
   MessagesSquare,
   MoreHorizontal,
   Network,
+  PencilRuler,
   Route,
-  Settings,
   Slack,
   Star,
 } from "lucide-react";
@@ -29,6 +31,7 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import React from "react";
 import { ChatSidebarSection } from "@/app/_parts/chat-sidebar-section";
+import { SidebarUserMenu } from "@/app/_parts/sidebar-user-menu";
 import { AppLogo } from "@/components/app-logo";
 import { SidebarWarningsAccordion } from "@/components/sidebar-warnings-accordion";
 import {
@@ -37,6 +40,7 @@ import {
   SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
+  SidebarGroupLabel,
   SidebarHeader,
   SidebarMenu,
   SidebarMenuButton,
@@ -78,15 +82,121 @@ interface NavGroup {
   items: NavItem[];
 }
 
-// Primary nav items shown in the header (flat list, like sidebar-10 NavMain)
-const headerNavItems: NavItem[] = [
+type SidebarMode = "chats" | "studio";
+
+const SIDEBAR_MODE_STORAGE_KEY = "archestra-sidebar-mode";
+
+// Items of the Chats tab (flat list above Recents)
+const chatsNavItems: NavItem[] = [
   {
     title: "New Chat",
     url: "/chat",
     icon: MessageCircle,
     customIsActive: (pathname: string) => pathname === "/chat",
   },
+  {
+    title: "Projects",
+    url: "/projects",
+    icon: FolderKanban,
+    customIsActive: (pathname: string) => pathname.startsWith("/projects"),
+  },
+  {
+    title: "My Files",
+    url: "/my-files",
+    icon: FolderOpen,
+    customIsActive: (pathname: string) => pathname.startsWith("/my-files"),
+  },
 ];
+
+/** Which tab a route belongs to; null = no opinion (keep the current tab). */
+function routeSidebarMode(pathname: string): SidebarMode | null {
+  const chatPrefixes = ["/chat", "/projects", "/my-files"];
+  if (
+    chatPrefixes.some((p) => pathname === p || pathname.startsWith(`${p}/`))
+  ) {
+    return "chats";
+  }
+  const studioPrefixes = [
+    "/agents",
+    "/scheduled-tasks",
+    "/mcp",
+    "/llm",
+    "/knowledge",
+    "/audit",
+    "/connection",
+  ];
+  if (
+    studioPrefixes.some((p) => pathname === p || pathname.startsWith(`${p}/`))
+  ) {
+    return "studio";
+  }
+  return null;
+}
+
+/**
+ * Chats/Studio tab state: explicit picks persist, and navigation that
+ * clearly belongs to one tab (deep links included) switches to it.
+ */
+function useSidebarMode(pathname: string) {
+  const [mode, setMode] = React.useState<SidebarMode>(
+    () => routeSidebarMode(pathname) ?? "chats",
+  );
+
+  React.useEffect(() => {
+    const stored = window.localStorage.getItem(SIDEBAR_MODE_STORAGE_KEY);
+    if (
+      (stored === "chats" || stored === "studio") &&
+      routeSidebarMode(window.location.pathname) === null
+    ) {
+      setMode(stored);
+    }
+  }, []);
+
+  React.useEffect(() => {
+    const routeMode = routeSidebarMode(pathname);
+    if (routeMode) setMode(routeMode);
+  }, [pathname]);
+
+  const pick = React.useCallback((next: SidebarMode) => {
+    setMode(next);
+    window.localStorage.setItem(SIDEBAR_MODE_STORAGE_KEY, next);
+  }, []);
+
+  return [mode, pick] as const;
+}
+
+/** Segmented Chats/Studio control (hidden when the sidebar is collapsed). */
+function SidebarModeToggle({
+  mode,
+  onPick,
+}: {
+  mode: SidebarMode;
+  onPick: (mode: SidebarMode) => void;
+}) {
+  const segment = (value: SidebarMode, label: string, Icon: LucideIcon) => (
+    <button
+      type="button"
+      key={value}
+      onClick={() => onPick(value)}
+      className={cn(
+        "flex flex-1 items-center justify-center gap-1 rounded-md px-1.5 py-1 text-xs transition-colors",
+        mode === value
+          ? "bg-background font-medium text-foreground shadow-sm"
+          : "text-muted-foreground hover:text-foreground",
+      )}
+    >
+      <Icon className="h-3.5 w-3.5" />
+      {label}
+    </button>
+  );
+
+  return (
+    <div className="mx-2 mt-1 flex rounded-lg border bg-muted p-0.5 group-data-[collapsible=icon]:hidden">
+      {segment("chats", "Chats", MessageCircle)}
+      {segment("studio", "Studio", PencilRuler)}
+    </div>
+  );
+}
 
 // Labeled groups shown in the scrollable content (like sidebar-10 Favorites/Workspaces)
 const contentNavGroups: NavGroup[] = [
@@ -125,6 +235,17 @@ const contentNavGroups: NavGroup[] = [
     ],
   },
   {
+    label: "Apps",
+    items: [
+      {
+        title: "Apps",
+        url: "/apps",
+        icon: AppWindow,
+        customIsActive: (pathname: string) => pathname.startsWith("/apps"),
+      },
+    ],
+  },
+  {
     label: "MCP & Tools",
     items: [
       {
@@ -139,6 +260,12 @@ const contentNavGroups: NavGroup[] = [
             url: "/mcp/gateways",
             customIsActive: (pathname: string) =>
               pathname.startsWith("/mcp/gateways"),
+          },
+          {
+            title: "Credentials",
+            url: "/mcp/credentials/oauth-clients",
+            customIsActive: (pathname: string) =>
+              pathname.startsWith("/mcp/credentials"),
           },
           {
             title: "Guardrails",
@@ -233,14 +360,12 @@ const NavPrimary = ({
   pathname,
   searchParams,
   permissionMap,
-  chatSection,
 }: {
   items: NavItem[];
   groups: NavGroup[];
   pathname: string;
   searchParams: URLSearchParams;
   permissionMap: Record<string, boolean>;
-  chatSection?: React.ReactNode;
 }) => {
   const { isMobile, setOpenMobile } = useSidebar();
 
@@ -265,7 +390,6 @@ const NavPrimary = ({
           <span>{item.title}</span>
         </SidebarPrefetchLink>
       </SidebarMenuButton>
-      {item.title === "New Chat" && chatSection}
       {item.subItems && item.subItems.length > 0 && (
         <SidebarMenuSub className="mx-0 ml-3.5 px-0 pl-2.5">
           {item.subItems
@@ -299,10 +423,34 @@ const NavPrimary = ({
   const permittedHeaderItems = items.filter(
     (item) => permissionMap[item.url] ?? true,
   );
+  // In Studio mode the header items don't include New Chat, and when collapsed
+  // the Chats/Studio toggle is hidden — so surface a collapsed-only New Chat in
+  // the icon rail. Skipped when New Chat is already a header item (Chats mode),
+  // to avoid a duplicate.
+  const hasNewChat = permittedHeaderItems.some((item) => item.url === "/chat");
 
   return (
     <SidebarGroup>
       <SidebarMenu>
+        {!hasNewChat && (
+          <SidebarMenuItem className="hidden group-data-[collapsible=icon]:block">
+            <SidebarMenuButton
+              asChild
+              tooltip="New Chat"
+              isActive={pathname === "/chat"}
+            >
+              <SidebarPrefetchLink
+                href="/chat"
+                onClick={() => {
+                  if (isMobile) setOpenMobile(false);
+                }}
+              >
+                <MessageCircle />
+                <span>New Chat</span>
+              </SidebarPrefetchLink>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        )}
         {permittedHeaderItems.map(renderItem)}
         <SidebarMenuItem className="hidden group-data-[collapsible=icon]:block">
           <SidebarMenuButton
@@ -469,47 +617,44 @@ export function AppSidebar() {
 
   // Skills are gated behind the ARCHESTRA_AGENTS_SKILLS_ENABLED env var.
   const skillsEnabled = useFeature("agentSkillsEnabled") === true;
+  // Projects and My Files are gated behind the ARCHESTRA_PROJECTS_ENABLED env var.
+  const projectsEnabled = useFeature("projectsEnabled") === true;
+  const [sidebarMode, pickSidebarMode] = useSidebarMode(pathname);
+  // Apps are gated behind the ARCHESTRA_APPS_ENABLED env var.
+  const appsEnabled = useFeature("appsEnabled") === true;
+
+  // Projects and My Files exist only when the projects feature is on.
+  const filteredChatsNavItems = React.useMemo(
+    () =>
+      chatsNavItems.filter(
+        (item) => item.title === "New Chat" || projectsEnabled,
+      ),
+    [projectsEnabled],
+  );
 
   // Filter nav groups based on connect permissions and feature flags
   const filteredNavGroups = React.useMemo(() => {
-    return contentNavGroups.map((group) => ({
-      ...group,
-      items: group.items
-        .filter((item) => {
-          if (item.title === "Connect" && !showConnect) return false;
-          return true;
-        })
-        .map((item) =>
-          item.subItems
-            ? {
-                ...item,
-                subItems: item.subItems.filter(
-                  (sub) => sub.url !== "/agents/skills" || skillsEnabled,
-                ),
-              }
-            : item,
-        ),
-    }));
-  }, [showConnect, skillsEnabled]);
-
-  // Build additional links for UserButton popout menu
-  const userMenuLinks = React.useMemo(() => {
-    const links: {
-      href: string;
-      icon?: React.ReactNode;
-      label: React.ReactNode;
-      separator?: boolean;
-    }[] = [];
-
-    links.push({
-      href: "/settings/account",
-      icon: <Settings className="h-4 w-4" />,
-      label: "Settings",
-      separator: true,
-    });
-
-    return links;
-  }, []);
+    return contentNavGroups
+      .filter((group) => group.label !== "Apps" || appsEnabled)
+      .map((group) => ({
+        ...group,
+        items: group.items
+          .filter((item) => {
+            if (item.title === "Connect" && !showConnect) return false;
+            return true;
+          })
+          .map((item) =>
+            item.subItems
+              ? {
+                  ...item,
+                  subItems: item.subItems.filter(
+                    (sub) => sub.url !== "/agents/skills" || skillsEnabled,
+                  ),
+                }
+              : item,
+          ),
+      }));
+  }, [showConnect, skillsEnabled, appsEnabled]);
 
   return (
     <Sidebar collapsible="icon">
@@ -529,14 +674,36 @@ export function AppSidebar() {
       <SidebarContent>
         {isAuthenticated && permissionMap && (
           <>
-            <NavPrimary
-              items={headerNavItems}
-              groups={filteredNavGroups}
-              pathname={pathname}
-              searchParams={searchParams}
-              permissionMap={permissionMap}
-              chatSection={<ChatSidebarSection />}
-            />
+            <SidebarModeToggle mode={sidebarMode} onPick={pickSidebarMode} />
+            {sidebarMode === "chats" ? (
+              <>
+                <NavPrimary
+                  items={filteredChatsNavItems}
+                  groups={[]}
+                  pathname={pathname}
+                  searchParams={searchParams}
+                  permissionMap={permissionMap}
+                />
+                <SidebarGroup className="pt-0">
+                  <SidebarGroupLabel>Recents</SidebarGroupLabel>
+                  <SidebarGroupContent>
+                    <SidebarMenu>
+                      <SidebarMenuItem>
+                        <ChatSidebarSection slots={15} flat />
+                      </SidebarMenuItem>
+                    </SidebarMenu>
+                  </SidebarGroupContent>
+                </SidebarGroup>
+              </>
+            ) : (
+              <NavPrimary
+                items={[]}
+                groups={filteredNavGroups}
+                pathname={pathname}
+                searchParams={searchParams}
+                permissionMap={permissionMap}
+              />
+            )}
             <NavSecondary
               items={[]}
               pathname={pathname}
@@ -561,7 +728,7 @@ export function AppSidebar() {
       </SidebarContent>
       <SidebarFooter>
         <SidebarWarningsAccordion />
-        <SignedIn>
+        {isAuthenticated && (
           <SidebarGroup className="mt-auto p-0">
             <SidebarGroupContent>
               <div
@@ -578,18 +745,11 @@ export function AppSidebar() {
                   "group-data-[collapsible=icon]:[&_button>svg]:hidden",
                 )}
               >
-                <UserButton
-                  size="default"
-                  align="center"
-                  side="top"
-                  className="w-full bg-transparent hover:bg-transparent text-foreground"
-                  disableDefaultLinks
-                  additionalLinks={userMenuLinks}
-                />
+                <SidebarUserMenu />
               </div>
             </SidebarGroupContent>
           </SidebarGroup>
-        </SignedIn>
+        )}
       </SidebarFooter>
     </Sidebar>
   );

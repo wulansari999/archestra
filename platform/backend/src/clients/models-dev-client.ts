@@ -2,7 +2,7 @@ import {
   MODELS_DEV_PROVIDER_MAP,
   type SupportedProvider,
   TimeInMs,
-} from "@shared";
+} from "@archestra/shared";
 import { z } from "zod";
 import { CacheKey, cacheManager } from "@/cache-manager";
 import logger from "@/logging";
@@ -402,6 +402,8 @@ class ModelsDevClient {
       deepseek: ["deepseek/"],
       minimax: ["minimax/"],
       azure: ["azure/"],
+      // Not synced via models.dev (subscription-dependent /models endpoint)
+      "github-copilot": [],
     };
 
     const getSourcePriority = (model: CreateModel): number => {

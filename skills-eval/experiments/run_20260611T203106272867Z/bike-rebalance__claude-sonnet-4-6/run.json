@@ -1,0 +1,18 @@
+{
+  "agent_error": "GET http://localhost:9010/api/skill-sandbox/conversations/8fae6e89-5fd7-4f49-82f7-15eeffb7edaa/file?path=%2Fhome%2Fsandbox%2Freport.json -> 503: {\"error\":{\"message\":\"Sandbox runtime is not available\",\"type\":\"unknown_api_error\"}}",
+  "artifacts": {},
+  "chat_api_key_id": "bdc1ba63-51cb-44f4-8b59-b4927ec0698a",
+  "conversation_id": "8fae6e89-5fd7-4f49-82f7-15eeffb7edaa",
+  "finish_reason": "tool-calls",
+  "finished_at": "2026-06-11T20:53:13.088059Z",
+  "model": "claude-sonnet-4-6",
+  "model_id": "6e2f1032-92b4-4440-9422-87814133a44c",
+  "output_path": "/home/sandbox/report.json",
+  "started_at": "2026-06-11T20:31:07.033170Z",
+  "task_id": "bike-rebalance",
+  "tool_call_count": 503,
+  "total_tokens": 64695,
+  "verifier_exit_code": null,
+  "verifier_passed": false,
+  "verifier_timed_out": null
+}

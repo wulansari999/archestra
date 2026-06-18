@@ -1,0 +1,22 @@
+{
+  "agent_error": null,
+  "artifacts": {
+    "report": "/Users/Arseny/dev/archestra_second/skills-eval/experiments/run_20260611T212545648655Z/bike-rebalance__claude-sonnet-4-6/report.json",
+    "verifier_stderr": "/Users/Arseny/dev/archestra_second/skills-eval/experiments/run_20260611T212545648655Z/bike-rebalance__claude-sonnet-4-6/verifier.stderr.txt",
+    "verifier_stdout": "/Users/Arseny/dev/archestra_second/skills-eval/experiments/run_20260611T212545648655Z/bike-rebalance__claude-sonnet-4-6/verifier.stdout.txt"
+  },
+  "chat_api_key_id": "bdc1ba63-51cb-44f4-8b59-b4927ec0698a",
+  "conversation_id": "daaf02c6-ab26-434a-89a2-ae40c021c71c",
+  "finish_reason": "stop",
+  "finished_at": "2026-06-11T21:50:41.263252Z",
+  "model": "claude-sonnet-4-6",
+  "model_id": "6e2f1032-92b4-4440-9422-87814133a44c",
+  "output_path": "/home/sandbox/report.json",
+  "started_at": "2026-06-11T21:25:46.232836Z",
+  "task_id": "bike-rebalance",
+  "tool_call_count": 52,
+  "total_tokens": 106798,
+  "verifier_exit_code": 1,
+  "verifier_passed": false,
+  "verifier_timed_out": false
+}

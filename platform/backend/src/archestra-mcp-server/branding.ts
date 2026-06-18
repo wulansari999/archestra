@@ -8,7 +8,7 @@ import {
   getArchestraToolPrefix,
   getArchestraToolShortName,
   TOOL_API_SHORT_NAME,
-} from "@shared";
+} from "@archestra/shared";
 import config from "@/config";
 import type { Organization } from "@/types";
 

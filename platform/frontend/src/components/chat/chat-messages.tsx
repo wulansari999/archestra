@@ -1,9 +1,13 @@
 import type { UIMessage } from "@ai-sdk/react";
 import {
+  APP_RENDERING_ARCHESTRA_TOOL_SHORT_NAMES,
   type ArchestraToolShortName,
   type archestraApiTypes,
   ChatMessageMetadataSchema,
   DocsPage,
+  getArchestraAppResourceUri,
+  getArchestraToolFullName,
+  HOOK_RUN_PART_TYPE,
   parseFullToolName,
   type ResourceVisibilityScope,
   SWAP_AGENT_FAILED_POKE_TEXT,
@@ -18,7 +22,7 @@ import {
   TOOL_SWAP_TO_DEFAULT_AGENT_SHORT_NAME,
   TOOL_TODO_WRITE_FULL_NAME,
   TOOL_TODO_WRITE_SHORT_NAME,
-} from "@shared";
+} from "@archestra/shared";
 import type { ChatStatus, DynamicToolUIPart, ToolUIPart } from "ai";
 import { BotIcon, CheckCircleIcon, ClockIcon } from "lucide-react";
 import Link from "next/link";
@@ -55,6 +59,10 @@ import {
   ToolInput,
   ToolOutput,
 } from "@/components/ai-elements/tool";
+import {
+  HookRunChip,
+  type HookRunChipData,
+} from "@/components/chat/hook-run-chip";
 import { ExternalDocsLink } from "@/components/external-docs-link";
 import { McpCatalogIcon } from "@/components/mcp-catalog-icon";
 import { StandardFormDialog } from "@/components/standard-dialog";
@@ -101,9 +109,11 @@ import { AssignedCredentialUnavailableTool } from "./assigned-credential-unavail
 import { AuthRequiredTool } from "./auth-required-tool";
 import {
   extractFileAttachments,
+  extractOwnedAppRender,
   filterOptimisticToolCalls,
   hasTextPart,
   identifyCompactToolGroups,
+  resolveRunToolTargetName,
 } from "./chat-messages.utils";
 import { CompactToolGroup, type ToolIconMap } from "./compact-tool-call";
 import { EditableAssistantMessage } from "./editable-assistant-message";
@@ -130,6 +140,7 @@ import {
 } from "./swap-agent-boundary";
 import { TodoWriteTool } from "./todo-write-tool";
 import { ToolErrorLogsButton } from "./tool-error-logs-button";
+import { ToolGrantApprovalCard } from "./tool-grant-approval-card";
 import { ToolStatusRow } from "./tool-status-row";
 
 interface ChatMessagesProps {
@@ -144,11 +155,13 @@ interface ChatMessagesProps {
   }>;
   isLoadingConversation?: boolean;
   onMessagesUpdate?: (messages: UIMessage[]) => void;
-  onUserMessageEdit?: (
-    editedMessage: UIMessage,
-    updatedMessages: UIMessage[],
-    editedPartIndex: number,
-  ) => void;
+  onRegenerateUserMessage?: (args: {
+    messageId: string;
+    partIndex: number;
+    text: string;
+  }) => Promise<void>;
+  /** Re-run the original prompt after the user connects a per-user provider. */
+  onProviderConnected?: () => void;
   error?: Error | null;
   chatErrors?: archestraApiTypes.GetChatConversationResponses["200"]["chatErrors"];
   compactions?: archestraApiTypes.GetChatConversationResponses["200"]["compactions"];
@@ -210,7 +223,8 @@ export function ChatMessages({
   optimisticToolCalls = [],
   isLoadingConversation = false,
   onMessagesUpdate,
-  onUserMessageEdit,
+  onRegenerateUserMessage,
+  onProviderConnected,
   error = null,
   chatErrors = [],
   compactions = [],
@@ -253,6 +267,12 @@ export function ChatMessages({
         getToolName(TOOL_SWAP_AGENT_SHORT_NAME),
         getToolName(TOOL_SWAP_TO_DEFAULT_AGENT_SHORT_NAME),
         getToolName(TOOL_TODO_WRITE_SHORT_NAME),
+        // Owned-app management tools render the app inline; compact grouping
+        // would swallow their parts before MessageTool sees them.
+        ...APP_RENDERING_ARCHESTRA_TOOL_SHORT_NAMES.flatMap((shortName) => [
+          getArchestraToolFullName(shortName),
+          getToolName(shortName),
+        ]),
       ]),
     [getToolName],
   );
@@ -296,6 +316,7 @@ export function ChatMessages({
   const session = conversationId ? getSession(conversationId) : null;
   const earlyToolUiStarts = session?.earlyToolUiStarts || {};
   const contextCompaction = session?.contextCompaction;
+  const hasPendingMcpElicitation = Boolean(session?.pendingMcpElicitation);
 
   // Debounce resize mode change when exiting edit mode to let DOM settle
   const isEditing = editingPartKey !== null;
@@ -354,30 +375,7 @@ export function ChatMessages({
     partIndex: number,
     newText: string,
   ) => {
-    const data = await updateChatMessageMutation.mutateAsync({
-      messageId,
-      partIndex,
-      text: newText,
-      deleteSubsequentMessages: true,
-    });
-
-    // Don't call onMessagesUpdate here - let onUserMessageEdit handle state
-    // to avoid race condition with old messages reappearing
-
-    // Find the edited message and trigger regeneration
-    // Pass the partIndex so the caller knows which specific part was edited
-    if (onUserMessageEdit && data?.messages) {
-      const editedMessage = (data.messages as UIMessage[]).find(
-        (m) => m.id === messageId,
-      );
-      if (editedMessage) {
-        onUserMessageEdit(
-          editedMessage,
-          data.messages as UIMessage[],
-          partIndex,
-        );
-      }
-    }
+    await onRegenerateUserMessage?.({ messageId, partIndex, text: newText });
   };
 
   const pendingToolCalls = useMemo(
@@ -524,6 +522,7 @@ export function ChatMessages({
                     agentName={agentName}
                     selectedModel={selectedModel}
                     modelSource={modelSource}
+                    onProviderConnected={onProviderConnected}
                   />
                 );
               }
@@ -583,8 +582,10 @@ export function ChatMessages({
                             message.id,
                             group.startIndex,
                           ),
-                          parts: group.entries.map(
-                            (entry) => entry.toolResultPart ?? entry.part,
+                          parts: group.entries.flatMap((entry) =>
+                            entry.kind === "tool"
+                              ? [entry.toolResultPart ?? entry.part]
+                              : [],
                           ),
                           dividerRef: unsafeBoundaryRef,
                           unsafeContextBoundary,
@@ -596,13 +597,22 @@ export function ChatMessages({
                                 message.id,
                                 group.startIndex,
                               )}
-                              tools={group.entries.map((entry) => ({
-                                key: getToolEntryKey(message.id, entry),
-                                toolName: entry.toolName,
-                                part: entry.part,
-                                toolResultPart: entry.toolResultPart,
-                                errorText: entry.errorText,
-                              }))}
+                              tools={group.entries.map((entry) =>
+                                entry.kind === "hook"
+                                  ? {
+                                      kind: "hook" as const,
+                                      key: `${message.id}-hook-${entry.partIndex}`,
+                                      data: entry.data,
+                                    }
+                                  : {
+                                      kind: "tool" as const,
+                                      key: getToolEntryKey(message.id, entry),
+                                      toolName: entry.toolName,
+                                      part: entry.part,
+                                      toolResultPart: entry.toolResultPart,
+                                      errorText: entry.errorText,
+                                    },
+                              )}
                               toolIconMap={toolIconMap}
                               canExpandToolCalls={canExpandToolCalls}
                               onToolApprovalResponse={onToolApprovalResponse}
@@ -1141,6 +1151,17 @@ export function ChatMessages({
                         }
 
                         default: {
+                          // Inline hook-run debug entry (a model-invisible
+                          // `data-hook-run` part the backend splices into the turn).
+                          if (part.type === HOOK_RUN_PART_TYPE) {
+                            return (
+                              <HookRunChip
+                                key={partKey}
+                                data={(part as { data?: HookRunChipData }).data}
+                              />
+                            );
+                          }
+
                           // data-tool-ui-start: early MCP App initialisation.
                           // This is the canonical render for the tool UI. It looks ahead
                           // in the parts array to find the matching input/output parts so
@@ -1331,6 +1352,7 @@ export function ChatMessages({
                 agentName={agentName}
                 selectedModel={selectedModel}
                 modelSource={modelSource}
+                onProviderConnected={onProviderConnected}
               />
             )}
             {pendingToolCalls.map((toolCall) => (
@@ -1361,7 +1383,7 @@ export function ChatMessages({
               }
               feedback={contextCompactionFeedback}
             />
-            {isResponseInProgress && (
+            {isResponseInProgress && !hasPendingMcpElicitation && (
               <div className="absolute bottom-[-10] left-0">
                 <Message from="assistant">
                   <img
@@ -1679,9 +1701,38 @@ const MessageTool = memo(
       (mcpOutput?._meta?.ui as { resourceUri?: string } | undefined)
         ?.resourceUri ?? earlyToolUiData?.uiResourceUri;
 
+    // When the model dispatched through run_tool, the MCP App belongs to the
+    // *target* tool. Unwrap so the app receives the target tool's name (for the
+    // sandbox origin and tool callbacks) and its real arguments (e.g. Excalidraw
+    // elements) instead of the run_tool wrapper.
+    const runToolInput =
+      getToolShortName(toolName) === TOOL_RUN_TOOL_SHORT_NAME
+        ? (part.input as {
+            tool_name?: string;
+            tool_args?: Record<string, unknown>;
+          } | null)
+        : null;
+    const mcpAppToolName = resolveRunToolTargetName(part, toolName, {
+      getToolShortName,
+    });
+    const mcpAppToolInput =
+      runToolInput?.tool_args ?? (part.input as Record<string, unknown>);
+
     // Use the text content string when available; fall back to the raw output for non-MCP tools.
     const output = mcpOutput?.content ?? rawOutput;
     const errorText = getToolErrorText({ part, toolResultPart });
+
+    // Owned-app management result (create/update/render_app): mount the
+    // app-bound runtime from structuredContent.id. Standard UI resources,
+    // errors, and denials take priority — those results keep their text.
+    const ownedApp =
+      !uiResourceUri && !errorText && part.state !== "output-denied"
+        ? extractOwnedAppRender({
+            toolName: mcpAppToolName,
+            output: rawOutput,
+            getToolShortName,
+          })
+        : null;
 
     const isApprovalRequested = part.state === "approval-requested";
     const isToolDenied = part.state === "output-denied";
@@ -1767,6 +1818,7 @@ const MessageTool = memo(
         <CompactToolGroup
           tools={[
             {
+              kind: "tool",
               key: part.toolCallId ?? toolName,
               toolName,
               part,
@@ -1832,7 +1884,7 @@ const MessageTool = memo(
     ) : null;
 
     // MCP App tools: compact circle + canvas below (no collapsible wrapper)
-    if (uiResourceUri && !isApprovalRequested && !errorText) {
+    if ((uiResourceUri || ownedApp) && !isApprovalRequested && !errorText) {
       const compactState = getCompactToolState({ part, toolResultPart });
       const shortName = parseFullToolName(toolName).toolName.replace(/_/g, " ");
       const iconInfo = toolIconMap?.get(toolName);
@@ -1905,24 +1957,36 @@ const MessageTool = memo(
           )}
           {agentId && (
             <div className="mt-3">
-              <McpAppSection
-                uiResourceUri={uiResourceUri}
-                agentId={agentId}
-                toolName={toolName}
-                toolCallId={part.toolCallId}
-                toolInput={part.input as Record<string, unknown>}
-                rawOutput={mcpOutput}
-                preloadedResource={
-                  earlyToolUiData?.html
-                    ? {
-                        html: earlyToolUiData.html,
-                        csp: earlyToolUiData.csp,
-                        permissions: earlyToolUiData.permissions,
-                      }
-                    : undefined
-                }
-                onSendMessage={onSendMessage}
-              />
+              {uiResourceUri ? (
+                <McpAppSection
+                  uiResourceUri={uiResourceUri}
+                  agentId={agentId}
+                  toolName={mcpAppToolName}
+                  toolCallId={part.toolCallId}
+                  toolInput={mcpAppToolInput}
+                  rawOutput={mcpOutput}
+                  preloadedResource={
+                    earlyToolUiData?.html
+                      ? {
+                          html: earlyToolUiData.html,
+                          csp: earlyToolUiData.csp,
+                          permissions: earlyToolUiData.permissions,
+                        }
+                      : undefined
+                  }
+                  onSendMessage={onSendMessage}
+                />
+              ) : ownedApp ? (
+                <McpAppSection
+                  uiResourceUri={getArchestraAppResourceUri(ownedApp.appId)}
+                  appId={ownedApp.appId}
+                  appVersion={ownedApp.latestVersion}
+                  agentId={agentId}
+                  toolName={mcpAppToolName}
+                  toolCallId={part.toolCallId}
+                  onSendMessage={onSendMessage}
+                />
+              ) : null}
             </div>
           )}
         </div>
@@ -1954,7 +2018,17 @@ const MessageTool = memo(
           {isApprovalRequested &&
             onToolApprovalResponse &&
             "approval" in part &&
-            part.approval?.id && (
+            part.approval?.id &&
+            (runToolInput?.tool_name && agentId ? (
+              // run_tool targeting a tool the agent may not have yet — propose
+              // granting it (assign + run) rather than a bare approve/deny.
+              <ToolGrantApprovalCard
+                targetToolName={runToolInput.tool_name}
+                agentId={agentId}
+                approvalId={part.approval.id}
+                onRespond={onToolApprovalResponse}
+              />
+            ) : (
               <ToolStatusRow
                 icon={
                   <ClockIcon className="mt-0.5 size-4 flex-none text-amber-600" />
@@ -1986,7 +2060,7 @@ const MessageTool = memo(
                   },
                 ]}
               />
-            )}
+            ))}
           {errorText && !authToolBody ? (
             <ToolErrorDetails errorText={errorText} />
           ) : null}
@@ -2002,9 +2076,9 @@ const MessageTool = memo(
               <McpAppSection
                 uiResourceUri={uiResourceUri}
                 agentId={agentId}
-                toolName={toolName}
+                toolName={mcpAppToolName}
                 toolCallId={part.toolCallId}
-                toolInput={part.input as Record<string, unknown>}
+                toolInput={mcpAppToolInput}
                 rawOutput={mcpOutput}
                 preloadedResource={
                   earlyToolUiData?.html

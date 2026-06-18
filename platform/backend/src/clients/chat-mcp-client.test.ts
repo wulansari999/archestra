@@ -1,12 +1,12 @@
-import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import {
   getArchestraToolFullName,
   TOOL_INVOCATION_APPROVAL_REQUIRED_AUTONOMOUS_REASON,
   TOOL_QUERY_KNOWLEDGE_SOURCES_FULL_NAME,
   TOOL_QUERY_KNOWLEDGE_SOURCES_SHORT_NAME,
   TOOL_WHOAMI_SHORT_NAME,
-} from "@shared";
+} from "@archestra/shared";
+import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { jsonSchema, type Tool } from "ai";
 import { beforeEach, vi } from "vitest";
 import { archestraMcpBranding } from "@/archestra-mcp-server";
@@ -14,8 +14,13 @@ import { TeamTokenModel } from "@/models";
 import ToolModel from "@/models/tool";
 import { resolveSessionExternalIdpToken } from "@/services/identity-providers/session-token";
 import { describe, expect, test } from "@/test";
+import { agentOwner } from "@/types";
 import * as chatClient from "./chat-mcp-client";
-import { mcpToolToModelOutput } from "./chat-mcp-client";
+import {
+  buildArchestraToolOutput,
+  mcpToolToModelOutput,
+  __test as toolBuilderTest,
+} from "./chat-tool-builder";
 import mcpClient from "./mcp-client";
 
 const mockConnect = vi.fn().mockRejectedValue(new Error("Connection closed"));
@@ -42,7 +47,7 @@ vi.mock("@modelcontextprotocol/sdk/client/streamableHttp.js", () => ({
 
 vi.mock("@/clients/mcp-client", () => ({
   default: {
-    executeToolCall: vi.fn(),
+    executeToolCallForOwner: vi.fn(),
   },
 }));
 
@@ -57,7 +62,7 @@ vi.mock("@/services/identity-providers/session-token", () => ({
 }));
 
 beforeEach(() => {
-  vi.mocked(mcpClient.executeToolCall).mockReset();
+  vi.mocked(mcpClient.executeToolCallForOwner).mockReset();
   vi.mocked(resolveSessionExternalIdpToken).mockResolvedValue(null);
   vi.mocked(StreamableHTTPClientTransport).mockClear();
 });
@@ -92,7 +97,7 @@ describe("isBrowserMcpTool", () => {
 });
 
 describe("normalizeJsonSchema", () => {
-  const { normalizeJsonSchema } = chatClient.__test;
+  const { normalizeJsonSchema } = toolBuilderTest;
 
   test("returns fallback schema for missing/invalid input", () => {
     expect(normalizeJsonSchema(null)).toEqual({
@@ -496,7 +501,7 @@ describe("executeMcpTool error handling", () => {
   });
 
   test("returns error text from text content array", async () => {
-    vi.mocked(mcpClient.executeToolCall).mockResolvedValueOnce(
+    vi.mocked(mcpClient.executeToolCallForOwner).mockResolvedValueOnce(
       mockResult({
         content: [{ type: "text", text: "Auth required: install the server" }],
         _meta: {
@@ -520,7 +525,7 @@ describe("executeMcpTool error handling", () => {
       }),
     );
 
-    const result = await chatClient.__test.executeMcpTool(baseCtx);
+    const result = await toolBuilderTest.executeMcpTool(baseCtx);
     expect(result.content).toBe("Auth required: install the server");
     expect(result._meta).toMatchObject({
       archestraError: expect.objectContaining({
@@ -540,7 +545,7 @@ describe("executeMcpTool error handling", () => {
   });
 
   test("joins multiple text content items with newline", async () => {
-    vi.mocked(mcpClient.executeToolCall).mockResolvedValueOnce(
+    vi.mocked(mcpClient.executeToolCallForOwner).mockResolvedValueOnce(
       mockResult({
         content: [
           { type: "text", text: "Error line 1" },
@@ -549,43 +554,43 @@ describe("executeMcpTool error handling", () => {
       }),
     );
 
-    const result = await chatClient.__test.executeMcpTool(baseCtx);
+    const result = await toolBuilderTest.executeMcpTool(baseCtx);
     expect(result.content).toBe("Error line 1\nError line 2");
   });
 
   test("falls back to JSON.stringify for non-text content items", async () => {
-    vi.mocked(mcpClient.executeToolCall).mockResolvedValueOnce(
+    vi.mocked(mcpClient.executeToolCallForOwner).mockResolvedValueOnce(
       mockResult({
         content: [{ type: "image", data: "base64..." }],
       }),
     );
 
-    const result = await chatClient.__test.executeMcpTool(baseCtx);
+    const result = await toolBuilderTest.executeMcpTool(baseCtx);
     expect(result.content).toBe(
       JSON.stringify({ type: "image", data: "base64..." }),
     );
   });
 
   test("returns error string when content is not an array", async () => {
-    vi.mocked(mcpClient.executeToolCall).mockResolvedValueOnce(
+    vi.mocked(mcpClient.executeToolCallForOwner).mockResolvedValueOnce(
       mockResult({ content: null, error: "Something failed" }),
     );
 
-    const result = await chatClient.__test.executeMcpTool(baseCtx);
+    const result = await toolBuilderTest.executeMcpTool(baseCtx);
     expect(result.content).toBe("Something failed");
   });
 
   test("returns fallback message when no content and no error", async () => {
-    vi.mocked(mcpClient.executeToolCall).mockResolvedValueOnce(
+    vi.mocked(mcpClient.executeToolCallForOwner).mockResolvedValueOnce(
       mockResult({ content: null }),
     );
 
-    const result = await chatClient.__test.executeMcpTool(baseCtx);
+    const result = await toolBuilderTest.executeMcpTool(baseCtx);
     expect(result.content).toBe("Tool execution failed");
   });
 
   test("preserves structured error metadata for auth-expired tool errors", async () => {
-    vi.mocked(mcpClient.executeToolCall).mockResolvedValueOnce(
+    vi.mocked(mcpClient.executeToolCallForOwner).mockResolvedValueOnce(
       mockResult({
         content: [
           {
@@ -618,7 +623,7 @@ describe("executeMcpTool error handling", () => {
       }),
     );
 
-    const result = await chatClient.__test.executeMcpTool(baseCtx);
+    const result = await toolBuilderTest.executeMcpTool(baseCtx);
 
     expect(result._meta).toMatchObject({
       archestraError: expect.objectContaining({
@@ -648,7 +653,7 @@ describe("executeMcpTool error handling", () => {
     const agent = await makeAgent();
     const tool = await makeTool({ name: "test_tool" });
 
-    vi.mocked(mcpClient.executeToolCall).mockResolvedValueOnce({
+    vi.mocked(mcpClient.executeToolCallForOwner).mockResolvedValueOnce({
       id: "call-1",
       name: "test_tool",
       content: [{ type: "text", text: "ARCH_TEST = secret-value" }],
@@ -660,7 +665,7 @@ describe("executeMcpTool error handling", () => {
       action: "mark_as_untrusted",
     });
 
-    const result = await chatClient.__test.executeMcpTool({
+    const result = await toolBuilderTest.executeMcpTool({
       ...baseCtx,
       agentId: agent.id,
       globalToolPolicy: "restrictive",
@@ -686,9 +691,13 @@ describe("executeMcpTool error handling", () => {
 describe("chat-mcp-client tool caching", () => {
   test("passes token auth context when chat executes archestra run_tool", async ({
     makeAgent,
+    makeAgentTool,
+    makeInternalMcpCatalog,
+    makeTool,
     makeUser,
     makeOrganization,
     makeMember,
+    makeConversation,
   }) => {
     const org = await makeOrganization();
     const user = await makeUser();
@@ -697,8 +706,18 @@ describe("chat-mcp-client tool caching", () => {
       organizationId: org.id,
       name: "Chat Run Tool Agent",
     });
+    const catalog = await makeInternalMcpCatalog();
+    const targetTool = await makeTool({
+      name: "workspace__find_projects",
+      catalogId: catalog.id,
+    });
+    await makeAgentTool(agent.id, targetTool.id);
 
-    const conversationId = "conversation-1";
+    const conversation = await makeConversation(agent.id, {
+      organizationId: org.id,
+      userId: user.id,
+    });
+    const conversationId = conversation.id;
     const cacheKey = chatClient.__test.getCacheKey(
       agent.id,
       user.id,
@@ -733,7 +752,7 @@ describe("chat-mcp-client tool caching", () => {
       cacheKey,
       mockClient as unknown as Client,
     );
-    vi.mocked(mcpClient.executeToolCall).mockResolvedValueOnce({
+    vi.mocked(mcpClient.executeToolCallForOwner).mockResolvedValueOnce({
       content: [{ type: "text", text: "Workspace projects" }],
       isError: false,
     } as never);
@@ -759,12 +778,12 @@ describe("chat-mcp-client tool caching", () => {
     );
 
     expect(result).toBe("Workspace projects");
-    expect(mcpClient.executeToolCall).toHaveBeenCalledWith(
+    expect(mcpClient.executeToolCallForOwner).toHaveBeenCalledWith(
       expect.objectContaining({
         name: "workspace__find_projects",
         arguments: {},
       }),
-      agent.id,
+      agentOwner(agent.id),
       expect.objectContaining({
         organizationId: org.id,
         isUserToken: true,
@@ -782,11 +801,14 @@ describe("chat-mcp-client tool caching", () => {
 
   test("requests approval for run_tool when the target tool requires approval", async ({
     makeAgent,
+    makeAgentTool,
+    makeInternalMcpCatalog,
     makeUser,
     makeOrganization,
     makeMember,
     makeTool,
     makeToolPolicy,
+    makeConversation,
   }) => {
     const org = await makeOrganization({ globalToolPolicy: "restrictive" });
     const user = await makeUser();
@@ -795,9 +817,12 @@ describe("chat-mcp-client tool caching", () => {
       organizationId: org.id,
       name: "Chat Wrapped Approval Agent",
     });
+    const catalog = await makeInternalMcpCatalog();
     const targetTool = await makeTool({
       name: `workspace__export_${crypto.randomUUID().slice(0, 8)}`,
+      catalogId: catalog.id,
     });
+    await makeAgentTool(agent.id, targetTool.id);
     await makeToolPolicy(targetTool.id, {
       action: "require_approval",
       conditions: [
@@ -805,7 +830,11 @@ describe("chat-mcp-client tool caching", () => {
       ],
     });
 
-    const conversationId = "conversation-approval";
+    const conversation = await makeConversation(agent.id, {
+      organizationId: org.id,
+      userId: user.id,
+    });
+    const conversationId = conversation.id;
     const cacheKey = chatClient.__test.getCacheKey(
       agent.id,
       user.id,
@@ -876,7 +905,7 @@ describe("chat-mcp-client tool caching", () => {
       ),
     ).resolves.toBe(false);
 
-    vi.mocked(mcpClient.executeToolCall).mockResolvedValueOnce({
+    vi.mocked(mcpClient.executeToolCallForOwner).mockResolvedValueOnce({
       content: [{ type: "text", text: "Export queued" }],
       isError: false,
     } as never);
@@ -890,12 +919,12 @@ describe("chat-mcp-client tool caching", () => {
     );
 
     expect(result).toBe("Export queued");
-    expect(mcpClient.executeToolCall).toHaveBeenCalledWith(
+    expect(mcpClient.executeToolCallForOwner).toHaveBeenCalledWith(
       expect.objectContaining({
         name: targetTool.name,
         arguments: { destination: "external" },
       }),
-      agent.id,
+      agentOwner(agent.id),
       expect.anything(),
       { conversationId },
     );
@@ -1552,11 +1581,270 @@ describe("mcpToolToModelOutput", () => {
 
     expect(result).toEqual({ type: "text", value: "Just text, no metadata" });
   });
+
+  test("forwards a bounded image block as a media model-output part", () => {
+    const result = mcpToolToModelOutput({
+      output: {
+        content: "App rendered clean.",
+        rawContent: [
+          { type: "text", text: "App rendered clean." },
+          { type: "image", data: "QUJD", mimeType: "image/jpeg" },
+        ],
+      },
+    });
+
+    expect(result).toEqual({
+      type: "content",
+      value: [
+        { type: "text", text: "App rendered clean." },
+        { type: "media", data: "QUJD", mediaType: "image/jpeg" },
+      ],
+    });
+  });
+
+  test("drops an oversized image block, keeping the text", () => {
+    const result = mcpToolToModelOutput({
+      output: {
+        content: "App rendered clean.",
+        rawContent: [
+          {
+            type: "image",
+            data: "A".repeat(2_000_001),
+            mimeType: "image/jpeg",
+          },
+        ],
+      },
+    });
+
+    expect(result).toEqual({ type: "text", value: "App rendered clean." });
+  });
+});
+
+describe("buildArchestraToolOutput", () => {
+  const archestraResponse = {
+    content: [{ type: "text" as const, text: "Diagram displayed!" }],
+    structuredContent: { checkpoint: "abc" },
+    _meta: { extra: true },
+  };
+
+  test("returns plain text for a direct non-app archestra tool even with structuredContent", async ({
+    makeAgent,
+  }) => {
+    const agent = await makeAgent();
+    const result = await buildArchestraToolOutput({
+      response: archestraResponse,
+      toolName: "archestra__whoami",
+      toolArguments: {},
+      agentId: agent.id,
+    });
+
+    expect(result).toBe("Diagram displayed!");
+  });
+
+  test("carries an image block as one media part without base64 in the text (end to end)", async ({
+    makeAgent,
+  }) => {
+    const agent = await makeAgent();
+    const base64 = "QUJDREVG".repeat(4); // valid base64, not a placeholder
+    const built = await buildArchestraToolOutput({
+      response: {
+        content: [
+          { type: "text" as const, text: "App rendered clean." },
+          { type: "image" as const, data: base64, mimeType: "image/jpeg" },
+        ],
+        isError: false,
+      },
+      toolName: "archestra__get_app_diagnostics",
+      toolArguments: {},
+      agentId: agent.id,
+    });
+
+    // the base64 must NOT be stringified into the text summary (it rides
+    // rawContent instead, to be stripped from history later)
+    expect(built).toMatchObject({ content: "App rendered clean.\n[image]" });
+    const richContent = (built as { content: string }).content;
+    expect(richContent).not.toContain(base64);
+
+    // and toModelOutput forwards it exactly once, as a media part
+    const modelOutput = mcpToolToModelOutput({ output: built });
+    expect(modelOutput.type).toBe("content");
+    const value = (modelOutput as { value: Array<Record<string, unknown>> })
+      .value;
+    const media = value.filter((p) => p.type === "media");
+    const textParts = value.filter((p) => p.type === "text");
+    expect(media).toEqual([
+      { type: "media", data: base64, mediaType: "image/jpeg" },
+    ]);
+    expect(textParts[0].text).not.toContain(base64);
+  });
+
+  test("does not re-forward a history-stripped image placeholder as media", () => {
+    const modelOutput = mcpToolToModelOutput({
+      output: {
+        content: "App rendered clean.",
+        rawContent: [
+          {
+            type: "image",
+            // what the history image-stripper leaves behind
+            data: "[Image data stripped to save context]",
+            mimeType: "image/jpeg",
+          },
+        ],
+      },
+    });
+    expect(modelOutput).toEqual({ type: "text", value: "App rendered clean." });
+  });
+
+  test.for([
+    "create_app",
+    "update_app",
+    "render_app",
+  ] as const)("returns the rich shape for a direct %s result so chat can mount the app runtime", async (shortName, {
+    makeAgent,
+  }) => {
+    const agent = await makeAgent();
+    const appResponse = {
+      content: [{ type: "text" as const, text: `Created app "Todo" (app-1).` }],
+      structuredContent: { id: "app-1", name: "Todo", latestVersion: 1 },
+      isError: false,
+    };
+
+    const result = await buildArchestraToolOutput({
+      response: appResponse,
+      toolName: `archestra__${shortName}`,
+      toolArguments: {},
+      agentId: agent.id,
+    });
+
+    expect(result).toMatchObject({
+      content: `Created app "Todo" (app-1).`,
+      structuredContent: { id: "app-1" },
+      rawContent: appResponse.content,
+    });
+  });
+
+  test("returns the rich shape for a run_tool dispatch with a bare create_app target", async ({
+    makeAgent,
+  }) => {
+    const agent = await makeAgent();
+    const appResponse = {
+      content: [{ type: "text" as const, text: `Created app "Todo" (app-1).` }],
+      structuredContent: { id: "app-1", name: "Todo", latestVersion: 1 },
+      isError: false,
+    };
+
+    const result = await buildArchestraToolOutput({
+      response: appResponse,
+      toolName: "archestra__run_tool",
+      toolArguments: { tool_name: "create_app", tool_args: {} },
+      agentId: agent.id,
+    });
+
+    expect(result).toMatchObject({
+      content: `Created app "Todo" (app-1).`,
+      structuredContent: { id: "app-1" },
+    });
+  });
+
+  test("returns plain text for an app tool error result", async ({
+    makeAgent,
+  }) => {
+    const agent = await makeAgent();
+    const result = await buildArchestraToolOutput({
+      response: {
+        content: [
+          { type: "text" as const, text: "Error: Authentication required." },
+        ],
+        isError: true,
+      },
+      toolName: "archestra__create_app",
+      toolArguments: {},
+      agentId: agent.id,
+    });
+
+    expect(result).toBe("Error: Authentication required.");
+  });
+
+  test("returns plain text for list_apps despite structuredContent", async ({
+    makeAgent,
+  }) => {
+    const agent = await makeAgent();
+    const result = await buildArchestraToolOutput({
+      response: {
+        content: [{ type: "text" as const, text: "2 apps" }],
+        structuredContent: { apps: [] },
+        isError: false,
+      },
+      toolName: "archestra__list_apps",
+      toolArguments: {},
+      agentId: agent.id,
+    });
+
+    expect(result).toBe("2 apps");
+  });
+
+  test("attaches the target tool's UI resource when dispatched via run_tool", async ({
+    makeAgent,
+  }) => {
+    const agent = await makeAgent();
+    const mockToolDef = {
+      name: "excalidraw__create_view",
+      meta: { _meta: { ui: { resourceUri: "ui://excalidraw/mcp-app.html" } } },
+    };
+    const spy = vi
+      .spyOn(ToolModel, "findByNameForAgent")
+      // biome-ignore lint/suspicious/noExplicitAny: test mock data
+      .mockResolvedValueOnce(mockToolDef as any);
+
+    const result = await buildArchestraToolOutput({
+      response: archestraResponse,
+      toolName: "archestra__run_tool",
+      toolArguments: {
+        tool_name: "excalidraw__create_view",
+        tool_args: { elements: "[]" },
+      },
+      agentId: agent.id,
+    });
+
+    expect(spy).toHaveBeenCalledWith("excalidraw__create_view", agent.id);
+    expect(typeof result).toBe("object");
+    expect(result).toMatchObject({
+      content: "Diagram displayed!",
+      _meta: {
+        extra: true,
+        ui: { resourceUri: "ui://excalidraw/mcp-app.html" },
+      },
+      structuredContent: { checkpoint: "abc" },
+    });
+
+    spy.mockRestore();
+  });
+
+  test("returns plain text when the dispatched target has no UI resource", async ({
+    makeAgent,
+  }) => {
+    const agent = await makeAgent();
+    const spy = vi
+      .spyOn(ToolModel, "findByNameForAgent")
+      // biome-ignore lint/suspicious/noExplicitAny: test mock data
+      .mockResolvedValueOnce({ name: "context7__search", meta: null } as any);
+
+    const result = await buildArchestraToolOutput({
+      response: archestraResponse,
+      toolName: "archestra__run_tool",
+      toolArguments: { tool_name: "context7__search", tool_args: {} },
+      agentId: agent.id,
+    });
+
+    expect(result).toBe("Diagram displayed!");
+
+    spy.mockRestore();
+  });
 });
 
 describe("throwIfApprovalRequired", () => {
   const { resolveApprovalPolicyTarget, throwIfApprovalRequired } =
-    chatClient.__test;
+    toolBuilderTest;
 
   test("does not throw when globalToolPolicy is permissive", async () => {
     await expect(

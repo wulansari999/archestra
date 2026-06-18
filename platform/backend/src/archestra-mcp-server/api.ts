@@ -1,6 +1,6 @@
 import { posix } from "node:path";
+import { TOOL_API_SHORT_NAME } from "@archestra/shared";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import { TOOL_API_SHORT_NAME } from "@shared";
 import { z } from "zod";
 import { loopbackGateway } from "@/auth";
 import {

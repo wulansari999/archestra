@@ -19,7 +19,7 @@ import {
   type SupportedProvider,
   TOOL_RUN_TOOL_SHORT_NAME,
   TOOL_SEARCH_TOOLS_SHORT_NAME,
-} from "@shared";
+} from "@archestra/shared";
 import {
   AlertTriangle,
   Bot,
@@ -38,6 +38,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { ConnectorTypeIcon } from "@/app/knowledge/knowledge-bases/_parts/connector-icons";
 import { AgentBadge } from "@/components/agent-badge";
+import { AgentHooksEditor } from "@/components/agent-hooks-editor";
 import type { AgentIconVariant } from "@/components/agent-icon";
 import { AgentIconPicker } from "@/components/agent-icon-picker";
 import {
@@ -48,8 +49,10 @@ import {
 import {
   AgentToolsEditor,
   type AgentToolsEditorRef,
+  type McpEnvConflict,
 } from "@/components/agent-tools-editor";
 import { ModelSelector } from "@/components/chat/model-selector";
+import { EnvironmentSelector } from "@/components/environment-selector";
 import { ExternalDocsLink } from "@/components/external-docs-link";
 import { LlmProviderApiKeyDropdown } from "@/components/llm-provider-api-key-dropdown";
 import {
@@ -57,7 +60,7 @@ import {
   PermissionRequirementHint,
 } from "@/components/permission-requirement-hint";
 import { SystemPromptEditor } from "@/components/system-prompt-editor";
-import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
   AssignmentCombobox,
   type AssignmentComboboxItem,
@@ -129,13 +132,15 @@ import {
 import { useHasPermissions } from "@/lib/auth/auth.query";
 import { useIdentityProviders } from "@/lib/auth/identity-provider-read.query";
 import { useChatProfileMcpTools } from "@/lib/chat/chat.query";
+import { useFeature } from "@/lib/config/config.query";
 import { getFrontendDocsUrl } from "@/lib/docs/docs";
+import { useEnvironments } from "@/lib/environment.query";
 import { useAppName } from "@/lib/hooks/use-app-name";
 import { useConnectors } from "@/lib/knowledge/connector.query";
 import { useKnowledgeBases } from "@/lib/knowledge/knowledge-base.query";
 import { useLlmModelsByProvider } from "@/lib/llm-models.query";
 import { useAvailableLlmProviderApiKeys } from "@/lib/llm-provider-api-keys.query";
-import { useTeams } from "@/lib/teams/team.query";
+import { useAssignableTeams } from "@/lib/teams/team.query";
 import { cn } from "@/lib/utils";
 import {
   getDescriptionPlaceholder,
@@ -208,6 +213,10 @@ function getBuiltInAgentConfigForSave(params: {
     case BUILT_IN_AGENT_IDS.CHAT_TITLE_GENERATION:
       return {
         name: BUILT_IN_AGENT_IDS.CHAT_TITLE_GENERATION,
+      };
+    case BUILT_IN_AGENT_IDS.APP_RUNTIME:
+      return {
+        name: BUILT_IN_AGENT_IDS.APP_RUNTIME,
       };
     default: {
       // exhaustive check: a new BUILT_IN_AGENT_ID will fail the build here
@@ -587,6 +596,20 @@ export function AgentDialog({
   const { data: identityProviders = [] } = useIdentityProviders({
     enabled: shouldLoadIdentityProviders && !!canReadIdentityProviders,
   });
+  // Sandbox environment binding (internal agents only): the agent's code sandbox
+  // runs on this environment's per-env Dagger engine + egress NetworkPolicy.
+  // Gated behind a feature flag (off by default) until the per-env runtime ships.
+  const agentEnvironmentsEnabled = useFeature("agentEnvironmentsEnabled");
+  const { data: environmentsData } = useEnvironments(
+    open && agentType === "agent" && !!agentEnvironmentsEnabled,
+  );
+  // Used to resolve the selected environment's name for the tools editor; the
+  // EnvironmentSelector owns its own list + permission filtering.
+  const environments = environmentsData?.environments ?? [];
+  // Scope the agent's MCP list to its environment only when the feature is on
+  // for an internal agent (same gate as the environment selector).
+  const environmentScopingEnabled =
+    agentType === "agent" && !!agentEnvironmentsEnabled;
   const { data: knowledgeBasesData } = useKnowledgeBases({
     enabled: shouldLoadKnowledgeSources && !!canReadKnowledgeBase,
   });
@@ -606,15 +629,18 @@ export function AgentDialog({
 
   // Fetch fresh agent data when dialog opens
   const { data: freshAgent, refetch: refetchAgent } = useProfile(agent?.id);
-  const { data: teams } = useTeams({
-    enabled: open && !!canReadTeams,
-  });
   const resource = getResourceForAgentType(agentType);
   const { data: isAdmin } = useHasPermissions({
     [resource]: ["admin"],
   });
   const { data: isTeamAdmin } = useHasPermissions({
     [resource]: ["team-admin"],
+  });
+  // Picker offers all teams to a full resource-admin, otherwise only the teams
+  // the user belongs to (the only ones the backend lets a team-admin assign).
+  const { data: teams } = useAssignableTeams({
+    isResourceAdmin: !!isAdmin,
+    enabled: open && !!canReadTeams,
   });
   const agentLabelsRef = useRef<ProfileLabelsRef>(null);
   const agentToolsEditorRef = useRef<AgentToolsEditorRef>(null);
@@ -641,6 +667,10 @@ export function AgentDialog({
   const [identityProviderId, setIdentityProviderId] = useState<
     string | null | undefined
   >(undefined);
+  const [environmentId, setEnvironmentId] = useState<string | null | undefined>(
+    undefined,
+  );
+  const [mcpEnvConflicts, setMcpEnvConflicts] = useState<McpEnvConflict[]>([]);
   const [scope, setScope] = useState<AgentScope>("personal");
   const [knowledgeBaseIds, setKnowledgeBaseIds] = useState<string[]>([]);
   const [connectorIds, setConnectorIds] = useState<string[]>([]);
@@ -655,6 +685,7 @@ export function AgentDialog({
   // Determine type-specific visibility based on agentType prop
   const isInternalAgent = agentType === "agent";
   const isBuiltIn = !!agent?.builtIn;
+  const agentHooksEnabled = useFeature("agentHooksEnabled");
   const builtInAgentName = agent?.builtInAgentConfig?.name;
   const isPolicyConfigBuiltIn =
     builtInAgentName === BUILT_IN_AGENT_IDS.POLICY_CONFIG;
@@ -709,6 +740,7 @@ export function AgentDialog({
         setLabels(agentData.labels);
         setConsiderContextUntrusted(agentData.considerContextUntrusted);
         setIdentityProviderId(agentData.identityProviderId ?? undefined);
+        setEnvironmentId(agentData.environmentId ?? undefined);
         setKnowledgeBaseIds(agentData.knowledgeBaseIds);
         setConnectorIds(agentData.connectorIds);
         setPassthroughHeaders(agentData.passthroughHeaders ?? []);
@@ -741,6 +773,7 @@ export function AgentDialog({
         setLabels([]);
         setConsiderContextUntrusted(false);
         setIdentityProviderId(undefined);
+        setEnvironmentId(undefined);
         setKnowledgeBaseIds([]);
         setConnectorIds([]);
         setScope("personal");
@@ -946,6 +979,7 @@ export function AgentDialog({
               systemPrompt: trimmedSystemPrompt || null,
               llmApiKeyId: llmApiKeyId || null,
               modelId: llmModel || null,
+              environmentId: environmentId || null,
               suggestedPrompts: validSuggestedPrompts,
             }),
             ...(supportsIdentityProvider && {
@@ -983,6 +1017,7 @@ export function AgentDialog({
             systemPrompt: trimmedSystemPrompt || null,
             llmApiKeyId: llmApiKeyId || null,
             modelId: llmModel || null,
+            environmentId: environmentId || null,
             suggestedPrompts: validSuggestedPrompts,
           }),
           ...(supportsIdentityProvider && {
@@ -1069,6 +1104,7 @@ export function AgentDialog({
     llmApiKeyId,
     llmModel,
     identityProviderId,
+    environmentId,
     knowledgeBaseIds,
     connectorIds,
     scope,
@@ -1282,6 +1318,19 @@ export function AgentDialog({
                 </div>
               )}
 
+              {/* Sandbox Environment (Agent only): binds the agent's code
+                  sandbox to a per-environment Dagger engine + egress policy.
+                  Feature-flagged off by default; hidden when only the default
+                  environment is available. */}
+              {isInternalAgent && agentEnvironmentsEnabled && (
+                <EnvironmentSelector
+                  value={environmentId ?? null}
+                  onChange={setEnvironmentId}
+                  hideWhenOnlyDefault
+                  className="rounded-lg border bg-card p-4"
+                />
+              )}
+
               {/* Suggested Prompts (Agent only, not built-in, collapsible) */}
               {isInternalAgent && !isBuiltIn && (
                 <Collapsible
@@ -1472,6 +1521,13 @@ export function AgentDialog({
                       assignmentScope={scope}
                       assignmentTeamIds={assignedTeamIds}
                       onSelectedCountChange={setSelectedToolsCount}
+                      environmentScopingEnabled={environmentScopingEnabled}
+                      agentEnvironmentId={environmentId ?? null}
+                      agentEnvironmentName={
+                        environments.find((env) => env.id === environmentId)
+                          ?.name ?? null
+                      }
+                      onConflictsChange={setMcpEnvConflicts}
                       openComboboxOnMount={openToolsCombobox}
                     />
                   </div>
@@ -1689,6 +1745,13 @@ export function AgentDialog({
                   )}
                 </div>
               )}
+
+              {/* Hooks (internal agents only, existing agents only; gated by
+                  the agent-hooks feature flag, which requires the agent runtime) */}
+              {agentHooksEnabled &&
+                isInternalAgent &&
+                !isBuiltIn &&
+                agent?.id && <AgentHooksEditor agentId={agent.id} />}
 
               {/* Section 4: Access & LLM */}
               {(!isBuiltIn || isInternalAgent) && (
@@ -2012,6 +2075,36 @@ export function AgentDialog({
               )}
             </div>
           </fieldset>
+          {!readOnly && mcpEnvConflicts.length > 0 && (
+            <Alert variant="warning" className="mt-4">
+              <AlertTriangle className="h-4 w-4" />
+              <AlertTitle>
+                {mcpEnvConflicts.length} MCP server
+                {mcpEnvConflicts.length === 1 ? "" : "s"} not in this
+                environment
+              </AlertTitle>
+              <AlertDescription>
+                <p>
+                  Remove {mcpEnvConflicts.length === 1 ? "it" : "them"} or
+                  change the environment before saving:{" "}
+                  <span className="font-medium text-foreground">
+                    {mcpEnvConflicts.map((c) => c.name).join(", ")}
+                  </span>
+                </p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="mt-2"
+                  onClick={() =>
+                    agentToolsEditorRef.current?.removeIncompatibleTools()
+                  }
+                >
+                  Remove incompatible
+                </Button>
+              </AlertDescription>
+            </Alert>
+          )}
           <DialogStickyFooter className="mt-0">
             <Button type="button" variant="outline" onClick={handleClose}>
               {readOnly ? "Close" : "Cancel"}
@@ -2025,6 +2118,7 @@ export function AgentDialog({
                   createAgent.isPending ||
                   updateAgent.isPending ||
                   requiresTeamSelection ||
+                  mcpEnvConflicts.length > 0 ||
                   (!isAdmin && scope === "team" && hasNoAvailableTeams)
                 }
               >
