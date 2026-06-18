@@ -719,6 +719,12 @@ async fn run_isolated_lane(
     }
 
     let fixture_mcp = if env.fixture_mcp {
+        // Enforced at config load (envs.rs), restated here: the fixture server is torn down per
+        // isolated lane, so it must never run under a shared backend.
+        debug_assert!(
+            !env.share_backend,
+            "fixture_mcp requires share_backend = false"
+        );
         match FixtureMcp::start(FIXTURE_MCP_NAME).await {
             Ok(fixture) => {
                 if let Err(e) = register_remote_mcp(

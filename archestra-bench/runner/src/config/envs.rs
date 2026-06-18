@@ -313,7 +313,10 @@ share_backend = {}
         )
         .unwrap();
         let err = load_envs(&envs_dir).unwrap_err();
-        assert!(err.to_string().contains("fixture_mcp requires share_backend = false"));
+        assert!(
+            err.to_string()
+                .contains("fixture_mcp requires share_backend = false")
+        );
     }
 
     #[test]

@@ -312,14 +312,28 @@ mod tests {
             "expected a sizable seat table, got {}",
             rows.len()
         );
+        let mut seat_ids = std::collections::HashSet::new();
         for s in &rows {
-            assert!(s.get("seat_id").and_then(JsonValue::as_str).is_some());
+            let seat_id = s
+                .get("seat_id")
+                .and_then(JsonValue::as_str)
+                .expect("seat_id must be a string");
+            assert!(seat_ids.insert(seat_id), "duplicate seat_id {seat_id}");
             assert!(
                 s.get("monthly_cost_cents")
                     .and_then(JsonValue::as_i64)
                     .is_some()
             );
-            assert!(s.get("status").and_then(JsonValue::as_str).is_some());
+            let status = s
+                .get("status")
+                .and_then(JsonValue::as_str)
+                .expect("status must be a string");
+            // The reclaimable-cost task filters on status == "unused"; an unexpected status value would
+            // silently change that total, so pin the allowed set here.
+            assert!(
+                ["active", "unused", "inactive"].contains(&status),
+                "unexpected seat status {status:?}"
+            );
         }
     }
 

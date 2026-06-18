@@ -64,8 +64,12 @@ def test_skill_loaded() -> None:
 
 def test_request_filed_with_corrected_fields() -> None:
     requests = _access_requests()
-    assert requests, "agent never called create_access_request"
-    final = requests[-1]
+    # Exactly one request: the skill says gather everything first, then file once. A premature stage-1
+    # submission (before the correction) followed by a corrected one is a protocol violation, not a pass.
+    assert len(requests) == 1, (
+        f"expected exactly one create_access_request call, got {len(requests)}"
+    )
+    final = requests[0]
 
     assert final.get("employee_email") == EXPECTED["employee_email"], final
     assert final.get("manager_email") == EXPECTED["manager_email"], final
