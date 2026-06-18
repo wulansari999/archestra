@@ -1,9 +1,0 @@
-{
-  "base_url": "http://localhost:9010",
-  "git_commit": "953fd8134e1088bf06f6b9245e188c19ec3e9016",
-  "models": [
-    "claude-sonnet-4-6"
-  ],
-  "started_at": "2026-06-11T20:59:58.739810Z",
-  "task": "bike-rebalance"
-}
