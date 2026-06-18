@@ -1,0 +1,34 @@
+[[stages]]
+text = """Attached is orders.xlsx (worksheet "Orders", columns: order_id, region, amount_cents, note). It's a
+binary file in your sandbox at /home/sandbox/attachments/orders.xlsx -- read it there (e.g. with openpyxl
+or pandas in run_command), not from this message.
+
+Tell me which region has the highest total amount_cents (if two regions tie, pick the one that sorts
+first alphabetically), and the overall total amount_cents across every order. Compute these yourself
+from the data.
+
+Call submit_result with result = {"top_region": "<region>", "total_cents": <integer total across all orders>}."""
+
+  [[stages.files]]
+  src = "workbook.xlsx"
+  dest = "/home/sandbox/attachments/orders.xlsx"
+  mime_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+[result_schema]
+type = "object"
+required = ["top_region", "total_cents"]
+additionalProperties = false
+
+  [result_schema.properties.top_region]
+  type = "string"
+  minLength = 1
+
+  [result_schema.properties.total_cents]
+  type = "integer"
+  minimum = 1
+
+[state]
+rest = ["/api/agents/{{agent_id}}/tools"]
+
+[verifier]
+deps = ["openpyxl==3.1.5"]

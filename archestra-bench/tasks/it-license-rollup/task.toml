@@ -1,0 +1,25 @@
+[[stages]]
+text = """You are an IT asset analyst at Acme. I need our total monthly software-license spend.
+
+The seat inventory is NOT in this message -- it lives in the connected Acme IT service desk MCP. Call
+its `list_seats` tool to fetch the full seat inventory (one row per seat, each with a
+`monthly_cost_cents` field). Then sum `monthly_cost_cents` across EVERY seat row (all departments, all
+statuses) to get the total monthly cost in whole cents.
+
+Do not estimate -- you can only get the real numbers from the tool. Then call submit_result with
+result = {"total_monthly_cost_cents": <integer total in cents>}."""
+
+[result_schema]
+type = "object"
+required = ["total_monthly_cost_cents"]
+additionalProperties = false
+
+  [result_schema.properties.total_monthly_cost_cents]
+  type = "integer"
+  minimum = 1
+
+[state]
+rest = ["/api/agents/{{agent_id}}/tools"]
+
+[verifier]
+deps = []

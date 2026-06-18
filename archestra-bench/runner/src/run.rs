@@ -19,6 +19,7 @@ use crate::client::{
 };
 use crate::config::types::{EnvConfig, Stage, Task};
 use crate::config::{Lane, load_envs, load_lanes};
+use crate::fixture_mcp::{FIXTURE_MCP_NAME, FixtureMcp};
 use crate::lifecycle::Instance;
 use crate::mcp_lock;
 use crate::mcp_server::{BenchmarkMcp, Submission};
@@ -717,6 +718,49 @@ async fn run_isolated_lane(
         }
     }
 
+    let fixture_mcp = if env.fixture_mcp {
+        match FixtureMcp::start(FIXTURE_MCP_NAME).await {
+            Ok(fixture) => {
+                if let Err(e) = register_remote_mcp(
+                    &client,
+                    fixture.name(),
+                    fixture.base_url(),
+                    "org",
+                    Some(std::slice::from_ref(&agent_id)),
+                )
+                .await
+                {
+                    fixture.stop().await;
+                    mcp.stop().await;
+                    let _ = instance.shutdown().await;
+                    return infra_results_for_lane(
+                        &env,
+                        &tasks,
+                        &lane,
+                        &ctx,
+                        &progress,
+                        &e.to_string(),
+                    );
+                }
+                Some(fixture)
+            }
+            Err(e) => {
+                mcp.stop().await;
+                let _ = instance.shutdown().await;
+                return infra_results_for_lane(
+                    &env,
+                    &tasks,
+                    &lane,
+                    &ctx,
+                    &progress,
+                    &e.to_string(),
+                );
+            }
+        }
+    } else {
+        None
+    };
+
     let results = run_lane(
         client,
         env,
@@ -730,6 +774,9 @@ async fn run_isolated_lane(
         progress,
     )
     .await;
+    if let Some(fixture) = &fixture_mcp {
+        fixture.stop().await;
+    }
     let _ = instance.shutdown().await;
     results
 }
@@ -2364,6 +2411,7 @@ mod tests {
             tasks,
             tools: vec![],
             share_backend: false,
+            fixture_mcp: false,
         }
     }
 

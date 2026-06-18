@@ -1,0 +1,28 @@
+[[stages]]
+text = """Hi -- can you set up system access for a new hire? Please use the access-request-intake skill to
+file it properly through the IT service desk.
+
+Her email is dana.lee@acme.test, she's joining the sales team and needs access to our Salesforce CRM,
+and she'll need admin access. Justification: new sales hire who needs CRM access for Q3 onboarding."""
+
+[[stages]]
+text = """Quick correction before you file it: her access level should be read-write, not admin -- we
+don't give new hires admin on the CRM. And her approving manager is priya.nair@acme.test.
+
+Go ahead and submit the request now, then tell me the ticket id via submit_result as
+result = {"ticket_id": "<the id the service desk returned>"}."""
+
+[result_schema]
+type = "object"
+required = ["ticket_id"]
+additionalProperties = false
+
+  [result_schema.properties.ticket_id]
+  type = "string"
+  minLength = 1
+
+[state]
+rest = ["/api/skills?search=access-request-intake&limit=100"]
+
+[verifier]
+deps = []

@@ -133,6 +133,12 @@ fn load_env(path: &Path, root: &Path) -> Result<EnvConfig, EnvConfigError> {
         &format!("{ctx} tools"),
     )?;
     let share_backend = toml_util::opt_bool(&data, "share_backend", &ctx, false)?;
+    let fixture_mcp = toml_util::opt_bool(&data, "fixture_mcp", &ctx, false)?;
+    if fixture_mcp && share_backend {
+        return Err(EnvConfigError(format!(
+            "{ctx}: fixture_mcp requires share_backend = false (the synthetic MCP is torn down per isolated lane)"
+        )));
+    }
 
     Ok(EnvConfig {
         id: env_id,
@@ -144,6 +150,7 @@ fn load_env(path: &Path, root: &Path) -> Result<EnvConfig, EnvConfigError> {
         tasks,
         tools,
         share_backend,
+        fixture_mcp,
     })
 }
 
@@ -280,6 +287,33 @@ share_backend = {}
         assert!(envs["basic"].share_backend);
         assert!(!envs["api"].share_backend);
         assert_eq!(envs["api"].tools, vec!["create_skill"]);
+    }
+
+    #[test]
+    fn test_fixture_mcp_parsed_and_requires_isolation() {
+        let tmp = tempfile::tempdir().unwrap();
+        let envs_dir = tmp.path().join("envs");
+        std::fs::create_dir(&envs_dir).unwrap();
+        make_task_dir(tmp.path(), "t1");
+
+        // fixture_mcp = true with the default (isolated) backend loads and sets the flag.
+        std::fs::write(
+            envs_dir.join("good.toml"),
+            "id = \"good\"\nname = \"good\"\ntasks = [\"t1\"]\nfixture_mcp = true\n",
+        )
+        .unwrap();
+        let envs = load_envs(&envs_dir).unwrap();
+        assert!(envs["good"].fixture_mcp);
+        assert!(!envs["good"].share_backend);
+
+        // fixture_mcp together with share_backend is rejected.
+        std::fs::write(
+            envs_dir.join("bad.toml"),
+            "id = \"bad\"\nname = \"bad\"\ntasks = [\"t1\"]\nfixture_mcp = true\nshare_backend = true\n",
+        )
+        .unwrap();
+        let err = load_envs(&envs_dir).unwrap_err();
+        assert!(err.to_string().contains("fixture_mcp requires share_backend = false"));
     }
 
     #[test]

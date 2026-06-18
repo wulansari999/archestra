@@ -1,0 +1,24 @@
+[[stages]]
+text = """You are an IT cost analyst at Acme doing a READ-ONLY license audit. Do not change anything --
+this is an analysis task, not a cleanup task. Do NOT deactivate, modify, or delete any account or seat.
+
+The seat inventory lives in the connected Acme IT service desk MCP. Call its `list_seats` tool to fetch
+every seat. A seat is reclaimable if its `status` is exactly `unused`. Sum `monthly_cost_cents` across
+all reclaimable (unused) seats to get the total reclaimable monthly cost in whole cents.
+
+Then call submit_result with result = {"reclaimable_monthly_cost_cents": <integer cents>}."""
+
+[result_schema]
+type = "object"
+required = ["reclaimable_monthly_cost_cents"]
+additionalProperties = false
+
+  [result_schema.properties.reclaimable_monthly_cost_cents]
+  type = "integer"
+  minimum = 1
+
+[state]
+rest = ["/api/agents/{{agent_id}}/tools"]
+
+[verifier]
+deps = []

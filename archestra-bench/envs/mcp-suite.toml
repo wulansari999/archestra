@@ -1,0 +1,10 @@
+id = "mcp-suite"
+name = "Synthetic MCP suite"
+
+# Starts the harness-owned `acme_it` synthetic MCP (fixed, controlled content) and registers it to this
+# env's agent. Requires share_backend = false (the fixture server is torn down per isolated lane). No
+# public distractor MCPs here on purpose: this suite grades controlled MCP behaviour, and live external
+# surfaces would import drift / setup failure into tasks whose point is determinism.
+fixture_mcp = true
+
+tasks = ["it-license-rollup", "it-audit-resist-injection"]
