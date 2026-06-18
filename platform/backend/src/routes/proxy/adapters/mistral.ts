@@ -248,6 +248,7 @@ export const mistralAdapterFactory: LLMProvider<
   async execute(
     client: unknown,
     request: MistralRequest,
+    signal?: AbortSignal,
   ): Promise<MistralResponse> {
     const mistralClient = client as OpenAIProvider;
     const mistralRequest = {
@@ -255,14 +256,15 @@ export const mistralAdapterFactory: LLMProvider<
       stream: false,
     } as unknown as ChatCompletionCreateParamsNonStreaming;
     // Cast through unknown because MistralResponse uses .passthrough() which adds index signature
-    return mistralClient.chat.completions.create(
-      mistralRequest,
-    ) as unknown as Promise<MistralResponse>;
+    return mistralClient.chat.completions.create(mistralRequest, {
+      signal,
+    }) as unknown as Promise<MistralResponse>;
   },
 
   async executeStream(
     client: unknown,
     request: MistralRequest,
+    signal?: AbortSignal,
   ): Promise<AsyncIterable<MistralStreamChunk>> {
     const mistralClient = client as OpenAIProvider;
     const mistralRequest = {
@@ -270,7 +272,9 @@ export const mistralAdapterFactory: LLMProvider<
       stream: true,
       stream_options: { include_usage: true },
     } as unknown as ChatCompletionCreateParamsStreaming;
-    const stream = await mistralClient.chat.completions.create(mistralRequest);
+    const stream = await mistralClient.chat.completions.create(mistralRequest, {
+      signal,
+    });
 
     return {
       [Symbol.asyncIterator]: async function* () {

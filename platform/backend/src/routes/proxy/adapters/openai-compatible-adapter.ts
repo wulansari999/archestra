@@ -83,20 +83,25 @@ export function createOpenAiCompatibleAdapterFactory(
 
     createClient,
 
-    async execute(client: unknown, request: Request): Promise<Response> {
+    async execute(
+      client: unknown,
+      request: Request,
+      signal?: AbortSignal,
+    ): Promise<Response> {
       const openaiClient = client as OpenAIProvider;
       const params = {
         ...request,
         stream: false,
       } as unknown as ChatCompletionCreateParamsNonStreaming;
-      return openaiClient.chat.completions.create(
-        params,
-      ) as unknown as Promise<Response>;
+      return openaiClient.chat.completions.create(params, {
+        signal,
+      }) as unknown as Promise<Response>;
     },
 
     async executeStream(
       client: unknown,
       request: Request,
+      signal?: AbortSignal,
     ): Promise<AsyncIterable<StreamChunk>> {
       const openaiClient = client as OpenAIProvider;
       const params = {
@@ -104,7 +109,9 @@ export function createOpenAiCompatibleAdapterFactory(
         stream: true,
         stream_options: { include_usage: true },
       } as unknown as ChatCompletionCreateParamsStreaming;
-      const stream = await openaiClient.chat.completions.create(params);
+      const stream = await openaiClient.chat.completions.create(params, {
+        signal,
+      });
 
       return {
         [Symbol.asyncIterator]: async function* () {

@@ -297,6 +297,7 @@ export const azureAdapterFactory: LLMProvider<
   async execute(
     client: unknown,
     request: AzureRequest,
+    signal?: AbortSignal,
   ): Promise<AzureResponse> {
     const azureClient = getAzureClientForRequest(client, request.model);
     const azureRequest = {
@@ -304,14 +305,15 @@ export const azureAdapterFactory: LLMProvider<
       stream: false,
     } as unknown as ChatCompletionCreateParamsNonStreaming;
 
-    return (await azureClient.chat.completions.create(
-      azureRequest,
-    )) as unknown as AzureResponse;
+    return (await azureClient.chat.completions.create(azureRequest, {
+      signal,
+    })) as unknown as AzureResponse;
   },
 
   async executeStream(
     client: unknown,
     request: AzureRequest,
+    signal?: AbortSignal,
   ): Promise<AsyncIterable<AzureStreamChunk>> {
     const azureClient = getAzureClientForRequest(client, request.model);
     const azureRequest = {
@@ -320,7 +322,9 @@ export const azureAdapterFactory: LLMProvider<
       stream_options: { include_usage: true },
     } as unknown as ChatCompletionCreateParamsStreaming;
 
-    const stream = await azureClient.chat.completions.create(azureRequest);
+    const stream = await azureClient.chat.completions.create(azureRequest, {
+      signal,
+    });
 
     return {
       [Symbol.asyncIterator]: async function* () {

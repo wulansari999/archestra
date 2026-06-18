@@ -234,21 +234,26 @@ export const xaiAdapterFactory: LLMProvider<
     });
   },
 
-  async execute(client: unknown, request: XaiRequest): Promise<XaiResponse> {
+  async execute(
+    client: unknown,
+    request: XaiRequest,
+    signal?: AbortSignal,
+  ): Promise<XaiResponse> {
     const xaiClient = client as OpenAIProvider;
     const xaiRequest = {
       ...request,
       stream: false,
     } as unknown as ChatCompletionCreateParamsNonStreaming;
 
-    return (await xaiClient.chat.completions.create(
-      xaiRequest,
-    )) as unknown as XaiResponse;
+    return (await xaiClient.chat.completions.create(xaiRequest, {
+      signal,
+    })) as unknown as XaiResponse;
   },
 
   async executeStream(
     client: unknown,
     request: XaiRequest,
+    signal?: AbortSignal,
   ): Promise<AsyncIterable<XaiStreamChunk>> {
     const xaiClient = client as OpenAIProvider;
     const xaiRequest = {
@@ -257,7 +262,9 @@ export const xaiAdapterFactory: LLMProvider<
       stream_options: { include_usage: true },
     } as unknown as ChatCompletionCreateParamsStreaming;
 
-    const stream = await xaiClient.chat.completions.create(xaiRequest);
+    const stream = await xaiClient.chat.completions.create(xaiRequest, {
+      signal,
+    });
 
     return {
       [Symbol.asyncIterator]: async function* () {

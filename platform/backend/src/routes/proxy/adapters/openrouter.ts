@@ -262,6 +262,7 @@ export const openrouterAdapterFactory: LLMProvider<
   async execute(
     client: unknown,
     request: OpenrouterRequest,
+    signal?: AbortSignal,
   ): Promise<OpenrouterResponse> {
     const openrouterClient = client as OpenAIProvider;
     const openrouterRequest = {
@@ -269,14 +270,15 @@ export const openrouterAdapterFactory: LLMProvider<
       stream: false,
     } as unknown as ChatCompletionCreateParamsNonStreaming;
 
-    return (await openrouterClient.chat.completions.create(
-      openrouterRequest,
-    )) as unknown as OpenrouterResponse;
+    return (await openrouterClient.chat.completions.create(openrouterRequest, {
+      signal,
+    })) as unknown as OpenrouterResponse;
   },
 
   async executeStream(
     client: unknown,
     request: OpenrouterRequest,
+    signal?: AbortSignal,
   ): Promise<AsyncIterable<OpenrouterStreamChunk>> {
     const openrouterClient = client as OpenAIProvider;
     const openrouterRequest = {
@@ -285,8 +287,10 @@ export const openrouterAdapterFactory: LLMProvider<
       stream_options: { include_usage: true },
     } as unknown as ChatCompletionCreateParamsStreaming;
 
-    const stream =
-      await openrouterClient.chat.completions.create(openrouterRequest);
+    const stream = await openrouterClient.chat.completions.create(
+      openrouterRequest,
+      { signal },
+    );
 
     return {
       [Symbol.asyncIterator]: async function* () {

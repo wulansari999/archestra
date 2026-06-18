@@ -72,6 +72,7 @@ export class BedrockClient {
   async converse(
     modelId: string,
     request: Record<string, unknown>,
+    signal?: AbortSignal,
   ): Promise<ConverseResponse> {
     const url = this.buildUrl(modelId, "converse");
     const body = JSON.stringify(request);
@@ -86,6 +87,7 @@ export class BedrockClient {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body,
+      signal,
     });
 
     if (!response.ok) {
@@ -114,6 +116,7 @@ export class BedrockClient {
   async converseStream(
     modelId: string,
     request: Record<string, unknown>,
+    signal?: AbortSignal,
   ): Promise<AsyncIterable<BedrockStreamEventWithRaw>> {
     const url = this.buildUrl(modelId, "converse-stream");
     const body = JSON.stringify(request);
@@ -128,6 +131,7 @@ export class BedrockClient {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body,
+      signal,
     });
 
     if (!response.ok) {

@@ -1170,20 +1170,25 @@ export const vllmAdapterFactory: LLMProvider<
     });
   },
 
-  async execute(client: unknown, request: VllmRequest): Promise<VllmResponse> {
+  async execute(
+    client: unknown,
+    request: VllmRequest,
+    signal?: AbortSignal,
+  ): Promise<VllmResponse> {
     const vllmClient = client as OpenAIProvider;
     const vllmRequest = {
       ...request,
       stream: false,
     } as unknown as ChatCompletionCreateParamsNonStreaming;
-    return vllmClient.chat.completions.create(
-      vllmRequest,
-    ) as Promise<VllmResponse>;
+    return vllmClient.chat.completions.create(vllmRequest, {
+      signal,
+    }) as Promise<VllmResponse>;
   },
 
   async executeStream(
     client: unknown,
     request: VllmRequest,
+    signal?: AbortSignal,
   ): Promise<AsyncIterable<VllmStreamChunk>> {
     const vllmClient = client as OpenAIProvider;
     const vllmRequest = {
@@ -1191,7 +1196,9 @@ export const vllmAdapterFactory: LLMProvider<
       stream: true,
       stream_options: { include_usage: true },
     } as unknown as ChatCompletionCreateParamsStreaming;
-    const stream = await vllmClient.chat.completions.create(vllmRequest);
+    const stream = await vllmClient.chat.completions.create(vllmRequest, {
+      signal,
+    });
 
     return {
       [Symbol.asyncIterator]: async function* () {

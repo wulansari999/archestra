@@ -236,21 +236,26 @@ export const groqAdapterFactory: LLMProvider<
     });
   },
 
-  async execute(client: unknown, request: GroqRequest): Promise<GroqResponse> {
+  async execute(
+    client: unknown,
+    request: GroqRequest,
+    signal?: AbortSignal,
+  ): Promise<GroqResponse> {
     const groqClient = client as OpenAIProvider;
     const groqRequest = {
       ...request,
       stream: false,
     } as unknown as ChatCompletionCreateParamsNonStreaming;
 
-    return (await groqClient.chat.completions.create(
-      groqRequest,
-    )) as unknown as GroqResponse;
+    return (await groqClient.chat.completions.create(groqRequest, {
+      signal,
+    })) as unknown as GroqResponse;
   },
 
   async executeStream(
     client: unknown,
     request: GroqRequest,
+    signal?: AbortSignal,
   ): Promise<AsyncIterable<GroqStreamChunk>> {
     const groqClient = client as OpenAIProvider;
     const groqRequest = {
@@ -259,7 +264,9 @@ export const groqAdapterFactory: LLMProvider<
       stream_options: { include_usage: true },
     } as unknown as ChatCompletionCreateParamsStreaming;
 
-    const stream = await groqClient.chat.completions.create(groqRequest);
+    const stream = await groqClient.chat.completions.create(groqRequest, {
+      signal,
+    });
 
     return {
       [Symbol.asyncIterator]: async function* () {

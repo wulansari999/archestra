@@ -248,6 +248,30 @@ export function withSessionContext<T>(
   return otelContext.with(ctx, fn);
 }
 
+/**
+ * Watches the inbound client connection and returns `[signal, unsubscribe]`:
+ * - `signal` fires when the client disconnects before the response is done. Pass it to the upstream call so a disconnect cancels it.
+ * - `unsubscribe` detaches the listener from inbound client connection.
+ *
+ * `isResponseDone` (e.g. `writableEnded`) tells the watcher to ignore the `"close"` event that Node also emits on a successful response.
+ */
+export function abortUpstreamOnClientDisconnect(
+  reply: FastifyReply,
+  isResponseDone: () => boolean,
+): [signal: AbortSignal, unsubscribe: () => void] {
+  const controller = new AbortController();
+
+  const onClose = () => {
+    if (!isResponseDone()) {
+      controller.abort();
+    }
+  };
+
+  reply.raw.on("close", onClose);
+
+  return [controller.signal, () => reply.raw.off("close", onClose)];
+}
+
 export function handleError(
   error: unknown,
   reply: FastifyReply,

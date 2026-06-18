@@ -399,12 +399,17 @@ export interface LLMProvider<TRequest, TResponse, TMessages, TChunk, THeaders> {
   // ---------------------------------------------------------------------------
 
   /** Execute non-streaming request */
-  execute(client: unknown, request: TRequest): Promise<TResponse>;
+  execute(
+    client: unknown,
+    request: TRequest,
+    signal?: AbortSignal,
+  ): Promise<TResponse>;
 
   /** Execute streaming request */
   executeStream(
     client: unknown,
     request: TRequest,
+    signal?: AbortSignal,
   ): Promise<AsyncIterable<TChunk>>;
 
   /**

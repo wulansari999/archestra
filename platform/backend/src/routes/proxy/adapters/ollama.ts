@@ -1173,20 +1173,22 @@ export const ollamaAdapterFactory: LLMProvider<
   async execute(
     client: unknown,
     request: OllamaRequest,
+    signal?: AbortSignal,
   ): Promise<OllamaResponse> {
     const ollamaClient = client as OpenAIProvider;
     const ollamaRequest = {
       ...request,
       stream: false,
     } as unknown as ChatCompletionCreateParamsNonStreaming;
-    return ollamaClient.chat.completions.create(
-      ollamaRequest,
-    ) as Promise<OllamaResponse>;
+    return ollamaClient.chat.completions.create(ollamaRequest, {
+      signal,
+    }) as Promise<OllamaResponse>;
   },
 
   async executeStream(
     client: unknown,
     request: OllamaRequest,
+    signal?: AbortSignal,
   ): Promise<AsyncIterable<OllamaStreamChunk>> {
     const ollamaClient = client as OpenAIProvider;
     const ollamaRequest = {
@@ -1195,7 +1197,9 @@ export const ollamaAdapterFactory: LLMProvider<
       stream_options: { include_usage: true },
     } as unknown as ChatCompletionCreateParamsStreaming;
 
-    const stream = await ollamaClient.chat.completions.create(ollamaRequest);
+    const stream = await ollamaClient.chat.completions.create(ollamaRequest, {
+      signal,
+    });
 
     return {
       [Symbol.asyncIterator]: async function* () {

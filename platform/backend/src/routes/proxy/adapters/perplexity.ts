@@ -496,20 +496,24 @@ export const perplexityAdapterFactory: LLMProvider<
   async execute(
     client: unknown,
     request: PerplexityRequest,
+    signal?: AbortSignal,
   ): Promise<PerplexityResponse> {
     const perplexityClient = client as OpenAIProvider;
     const perplexityRequest = {
       ...request,
       stream: false,
     } as unknown as ChatCompletionCreateParamsNonStreaming;
-    const response =
-      await perplexityClient.chat.completions.create(perplexityRequest);
+    const response = await perplexityClient.chat.completions.create(
+      perplexityRequest,
+      { signal },
+    );
     return response as unknown as PerplexityResponse;
   },
 
   async executeStream(
     client: unknown,
     request: PerplexityRequest,
+    signal?: AbortSignal,
   ): Promise<AsyncIterable<PerplexityStreamChunk>> {
     const perplexityClient = client as OpenAIProvider;
     const perplexityRequest = {
@@ -517,8 +521,10 @@ export const perplexityAdapterFactory: LLMProvider<
       stream: true,
       stream_options: { include_usage: true },
     } as unknown as ChatCompletionCreateParamsStreaming;
-    const stream =
-      await perplexityClient.chat.completions.create(perplexityRequest);
+    const stream = await perplexityClient.chat.completions.create(
+      perplexityRequest,
+      { signal },
+    );
 
     return {
       [Symbol.asyncIterator]: async function* () {

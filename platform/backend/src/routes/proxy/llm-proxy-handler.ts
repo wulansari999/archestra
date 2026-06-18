@@ -78,6 +78,7 @@ import {
   virtualKeyRateLimiter,
 } from "./llm-proxy-auth";
 import {
+  abortUpstreamOnClientDisconnect,
   buildInteractionRecord,
   calculateInteractionCosts,
   handleError,
@@ -1006,6 +1007,12 @@ async function handleStreaming<
     `[${providerName}Proxy] Starting streaming request`,
   );
 
+  const [upstreamAbortSignal, unsubscribeFromClientDisconnect] =
+    abortUpstreamOnClientDisconnect(
+      reply,
+      () => streamCompleted || reply.raw.writableFinished,
+    );
+
   try {
     // Execute streaming request with tracing — the span covers the full streaming
     // operation (request → all chunks consumed) so we can set response attributes
@@ -1030,7 +1037,11 @@ async function handleStreaming<
       parentContext,
       user: toSpanUserInfo(resolvedUser),
       callback: async (llmSpan) => {
-        const stream = await provider.executeStream(client, request);
+        const stream = await provider.executeStream(
+          client,
+          request,
+          upstreamAbortSignal,
+        );
 
         // Process chunks
         // Per-tool buffer/stream decisions: only "Allow always" tools stream immediately.
@@ -1290,6 +1301,8 @@ async function handleStreaming<
       provider.extractInternalCode.bind(provider),
     );
   } finally {
+    unsubscribeFromClientDisconnect();
+
     // Always record interaction (whether stream completed or was aborted)
     if (!streamCompleted) {
       logger.info(
@@ -1446,106 +1459,120 @@ async function handleNonStreaming<
     `[${providerName}Proxy] Starting non-streaming request`,
   );
 
+  const [upstreamAbortSignal, unsubscribeFromClientDisconnect] =
+    abortUpstreamOnClientDisconnect(reply, () => reply.raw.writableEnded);
+
   // Execute request with tracing
-  const { responseAdapter } = await utils.tracing.startActiveLlmSpan({
-    operationName: provider.spanName,
-    provider: providerName,
-    model: actualModel,
-    stream: false,
-    agent,
-    teams,
-    userTeams,
-    sessionId,
-    executionId,
-    externalAgentId,
-    authMethod,
-    authenticatedApp,
-    source,
-    serverAddress: provider.getBaseUrl(),
-    promptMessages: provider
-      .createRequestAdapter(originalRequest)
-      .getProviderMessages(),
-    parentContext,
-    user: toSpanUserInfo(resolvedUser),
-    callback: async (llmSpan) => {
-      const result = await provider.execute(client, request);
-      const adapter = provider.createResponseAdapter(result);
+  const { responseAdapter } = await utils.tracing
+    .startActiveLlmSpan({
+      operationName: provider.spanName,
+      provider: providerName,
+      model: actualModel,
+      stream: false,
+      agent,
+      teams,
+      userTeams,
+      sessionId,
+      executionId,
+      externalAgentId,
+      authMethod,
+      authenticatedApp,
+      source,
+      serverAddress: provider.getBaseUrl(),
+      promptMessages: provider
+        .createRequestAdapter(originalRequest)
+        .getProviderMessages(),
+      parentContext,
+      user: toSpanUserInfo(resolvedUser),
+      callback: async (llmSpan) => {
+        const result = await provider.execute(
+          client,
+          request,
+          upstreamAbortSignal,
+        );
+        const adapter = provider.createResponseAdapter(result);
 
-      // Set response attributes on span per OTEL GenAI semconv
-      const usage = adapter.getUsage();
-      llmSpan.setAttribute(ATTR_GENAI_RESPONSE_MODEL, adapter.getModel());
-      llmSpan.setAttribute(ATTR_GENAI_RESPONSE_ID, adapter.getId());
-      // Per the GenAI semconv, gen_ai.usage.input_tokens includes cached tokens.
-      // Internally usage.inputTokens is uncached-only (cost, metrics, and DB
-      // depend on that), so add cache read/write back for the span attributes.
-      // The uncached value is still derivable as input_tokens -
-      // cache_read.input_tokens - cache_creation.input_tokens.
-      const totalInputTokens =
-        usage.inputTokens +
-        (usage.cacheReadTokens ?? 0) +
-        (usage.cacheWriteTokens ?? 0);
-      llmSpan.setAttribute(ATTR_GENAI_USAGE_INPUT_TOKENS, totalInputTokens);
-      llmSpan.setAttribute(ATTR_GENAI_USAGE_OUTPUT_TOKENS, usage.outputTokens);
-      llmSpan.setAttribute(
-        ATTR_GENAI_USAGE_TOTAL_TOKENS,
-        totalInputTokens + usage.outputTokens,
-      );
-      if (usage.cacheReadTokens) {
+        // Set response attributes on span per OTEL GenAI semconv
+        const usage = adapter.getUsage();
+        llmSpan.setAttribute(ATTR_GENAI_RESPONSE_MODEL, adapter.getModel());
+        llmSpan.setAttribute(ATTR_GENAI_RESPONSE_ID, adapter.getId());
+        // Per the GenAI semconv, gen_ai.usage.input_tokens includes cached tokens.
+        // Internally usage.inputTokens is uncached-only (cost, metrics, and DB
+        // depend on that), so add cache read/write back for the span attributes.
+        // The uncached value is still derivable as input_tokens -
+        // cache_read.input_tokens - cache_creation.input_tokens.
+        const totalInputTokens =
+          usage.inputTokens +
+          (usage.cacheReadTokens ?? 0) +
+          (usage.cacheWriteTokens ?? 0);
+        llmSpan.setAttribute(ATTR_GENAI_USAGE_INPUT_TOKENS, totalInputTokens);
         llmSpan.setAttribute(
-          ATTR_GENAI_USAGE_CACHE_READ_INPUT_TOKENS,
-          usage.cacheReadTokens,
+          ATTR_GENAI_USAGE_OUTPUT_TOKENS,
+          usage.outputTokens,
         );
-      }
-      if (usage.cacheWriteTokens) {
         llmSpan.setAttribute(
-          ATTR_GENAI_USAGE_CACHE_CREATION_INPUT_TOKENS,
-          usage.cacheWriteTokens,
+          ATTR_GENAI_USAGE_TOTAL_TOKENS,
+          totalInputTokens + usage.outputTokens,
         );
-      }
-      if (usage.cacheWrite1hTokens) {
-        llmSpan.setAttribute(
-          ATTR_ARCHESTRA_USAGE_CACHE_CREATION_1H_INPUT_TOKENS,
-          usage.cacheWrite1hTokens,
-        );
-      }
-      if (usage.reasoningTokens) {
-        llmSpan.setAttribute(
-          ATTR_GENAI_USAGE_REASONING_OUTPUT_TOKENS,
-          usage.reasoningTokens,
-        );
-      }
-      const cost = await utils.costOptimization.calculateCost(
-        actualModel,
-        usage.inputTokens,
-        usage.outputTokens,
-        providerName,
-        {
-          readTokens: usage.cacheReadTokens,
-          writeTokens: usage.cacheWriteTokens,
-          write1hTokens: usage.cacheWrite1hTokens,
-        },
-      );
-      if (cost !== undefined) {
-        llmSpan.setAttribute(ATTR_ARCHESTRA_COST, cost);
-      }
-      llmSpan.setAttribute(
-        ATTR_GENAI_RESPONSE_FINISH_REASONS,
-        adapter.getFinishReasons(),
-      );
-
-      // Capture completion content
-      if (captureContent) {
-        const text = adapter.getText?.();
-        if (text) {
-          llmSpan.addEvent(EVENT_GENAI_CONTENT_COMPLETION, {
-            [ATTR_GENAI_COMPLETION]: text.slice(0, contentMaxLength),
-          });
+        if (usage.cacheReadTokens) {
+          llmSpan.setAttribute(
+            ATTR_GENAI_USAGE_CACHE_READ_INPUT_TOKENS,
+            usage.cacheReadTokens,
+          );
         }
-      }
+        if (usage.cacheWriteTokens) {
+          llmSpan.setAttribute(
+            ATTR_GENAI_USAGE_CACHE_CREATION_INPUT_TOKENS,
+            usage.cacheWriteTokens,
+          );
+        }
+        if (usage.cacheWrite1hTokens) {
+          llmSpan.setAttribute(
+            ATTR_ARCHESTRA_USAGE_CACHE_CREATION_1H_INPUT_TOKENS,
+            usage.cacheWrite1hTokens,
+          );
+        }
+        if (usage.reasoningTokens) {
+          llmSpan.setAttribute(
+            ATTR_GENAI_USAGE_REASONING_OUTPUT_TOKENS,
+            usage.reasoningTokens,
+          );
+        }
+        const cost = await utils.costOptimization.calculateCost(
+          actualModel,
+          usage.inputTokens,
+          usage.outputTokens,
+          providerName,
+          {
+            readTokens: usage.cacheReadTokens,
+            writeTokens: usage.cacheWriteTokens,
+            write1hTokens: usage.cacheWrite1hTokens,
+          },
+        );
+        if (cost !== undefined) {
+          llmSpan.setAttribute(ATTR_ARCHESTRA_COST, cost);
+        }
+        llmSpan.setAttribute(
+          ATTR_GENAI_RESPONSE_FINISH_REASONS,
+          adapter.getFinishReasons(),
+        );
 
-      return { response: result, responseAdapter: adapter };
-    },
-  });
+        // Capture completion content
+        if (captureContent) {
+          const text = adapter.getText?.();
+          if (text) {
+            llmSpan.addEvent(EVENT_GENAI_CONTENT_COMPLETION, {
+              [ATTR_GENAI_COMPLETION]: text.slice(0, contentMaxLength),
+            });
+          }
+        }
+
+        return { response: result, responseAdapter: adapter };
+      },
+    })
+    .finally(() => {
+      unsubscribeFromClientDisconnect();
+    });
 
   const toolCalls = responseAdapter.getToolCalls();
   logger.debug(

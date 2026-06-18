@@ -1222,17 +1222,22 @@ export const anthropicAdapterFactory: LLMProvider<
   async execute(
     client: unknown,
     request: AnthropicRequest,
+    signal?: AbortSignal,
   ): Promise<AnthropicResponse> {
     const anthropicClient = client as AnthropicProvider;
-    return anthropicClient.messages.create({
-      ...request,
-      stream: false,
-    } as AnthropicProvider.Messages.MessageCreateParamsNonStreaming);
+    return anthropicClient.messages.create(
+      {
+        ...request,
+        stream: false,
+      } as AnthropicProvider.Messages.MessageCreateParamsNonStreaming,
+      { signal },
+    );
   },
 
   async executeStream(
     client: unknown,
     request: AnthropicRequest,
+    signal?: AbortSignal,
   ): Promise<AsyncIterable<AnthropicStreamChunk>> {
     const anthropicClient = client as AnthropicProvider;
     // use the raw create() stream rather than the messages.stream() helper: the
@@ -1240,10 +1245,13 @@ export const anthropicAdapterFactory: LLMProvider<
     // throws (unguarded) when a non-conformant upstream emits deltas that
     // concatenate into more than one JSON value. we do our own guarded tool-call
     // accumulation in processChunk, so the raw event stream is all we need.
-    return anthropicClient.messages.create({
-      ...request,
-      stream: true,
-    } as AnthropicProvider.Messages.MessageCreateParamsStreaming);
+    return anthropicClient.messages.create(
+      {
+        ...request,
+        stream: true,
+      } as AnthropicProvider.Messages.MessageCreateParamsStreaming,
+      { signal },
+    );
   },
 
   extractInternalCode(error: unknown): ArchestraInternalErrorCode | undefined {

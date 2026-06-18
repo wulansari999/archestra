@@ -1493,20 +1493,22 @@ export const openaiAdapterFactory: LLMProvider<
   async execute(
     client: unknown,
     request: OpenAiRequest,
+    signal?: AbortSignal,
   ): Promise<OpenAiResponse> {
     const openaiClient = client as OpenAIProvider;
     const openaiRequest = {
       ...request,
       stream: false,
     } as unknown as ChatCompletionCreateParamsNonStreaming;
-    return openaiClient.chat.completions.create(
-      openaiRequest,
-    ) as Promise<OpenAiResponse>;
+    return openaiClient.chat.completions.create(openaiRequest, {
+      signal,
+    }) as Promise<OpenAiResponse>;
   },
 
   async executeStream(
     client: unknown,
     request: OpenAiRequest,
+    signal?: AbortSignal,
   ): Promise<AsyncIterable<OpenAiStreamChunk>> {
     const openaiClient = client as OpenAIProvider;
     const openaiRequest = {
@@ -1514,7 +1516,9 @@ export const openaiAdapterFactory: LLMProvider<
       stream: true,
       stream_options: { include_usage: true },
     } as unknown as ChatCompletionCreateParamsStreaming;
-    const stream = await openaiClient.chat.completions.create(openaiRequest);
+    const stream = await openaiClient.chat.completions.create(openaiRequest, {
+      signal,
+    });
 
     return {
       [Symbol.asyncIterator]: async function* () {

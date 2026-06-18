@@ -1390,6 +1390,7 @@ export const geminiAdapterFactory: LLMProvider<
   async execute(
     client: unknown,
     request: GeminiRequestWithModel,
+    signal?: AbortSignal,
   ): Promise<GeminiResponse> {
     const genAI = client as GoogleGenAI;
     const model = request._model ?? "gemini-2.5-pro";
@@ -1406,11 +1407,12 @@ export const geminiAdapterFactory: LLMProvider<
       { ...request, contents: request.contents || [] },
       model,
       tools,
-    );
+    ) as GenerateContentParameters;
 
-    const response = await genAI.models.generateContent(
-      sdkParams as GenerateContentParameters,
-    );
+    const response = await genAI.models.generateContent({
+      ...sdkParams,
+      config: { ...sdkParams.config, abortSignal: signal },
+    });
 
     // Convert SDK response to REST format
     return sdkResponseToRestResponse(response, model);
@@ -1419,6 +1421,7 @@ export const geminiAdapterFactory: LLMProvider<
   async executeStream(
     client: unknown,
     request: GeminiRequestWithModel,
+    signal?: AbortSignal,
   ): Promise<AsyncIterable<GeminiStreamChunk>> {
     const genAI = client as GoogleGenAI;
     const model = request._model ?? "gemini-2.5-pro";
@@ -1435,11 +1438,12 @@ export const geminiAdapterFactory: LLMProvider<
       { ...request, contents: request.contents || [] },
       model,
       tools,
-    );
+    ) as GenerateContentParameters;
 
-    const streamingResponse = await genAI.models.generateContentStream(
-      sdkParams as GenerateContentParameters,
-    );
+    const streamingResponse = await genAI.models.generateContentStream({
+      ...sdkParams,
+      config: { ...sdkParams.config, abortSignal: signal },
+    });
 
     // Return async iterable that yields stream chunks
     return {

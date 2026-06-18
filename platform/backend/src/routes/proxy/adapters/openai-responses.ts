@@ -111,24 +111,30 @@ export const openAiResponsesAdapterFactory: LLMProvider<
   async execute(
     client: unknown,
     request: OpenAiResponsesRequest,
+    signal?: AbortSignal,
   ): Promise<OpenAiResponsesResponse> {
     const openaiClient = client as OpenAIProvider;
 
     return (await openaiClient.responses.create(
       request as ResponseCreateParamsNonStreaming,
+      { signal },
     )) as unknown as OpenAiResponsesResponse;
   },
 
   async executeStream(
     client: unknown,
     request: OpenAiResponsesRequest,
+    signal?: AbortSignal,
   ): Promise<AsyncIterable<OpenAiResponsesStreamChunk>> {
     const openaiClient = client as OpenAIProvider;
 
-    return (await openaiClient.responses.create({
-      ...request,
-      stream: true,
-    } as ResponseCreateParamsStreaming)) as AsyncIterable<OpenAiResponsesStreamChunk>;
+    return (await openaiClient.responses.create(
+      {
+        ...request,
+        stream: true,
+      } as ResponseCreateParamsStreaming,
+      { signal },
+    )) as AsyncIterable<OpenAiResponsesStreamChunk>;
   },
 
   extractInternalCode(error: unknown): ArchestraInternalErrorCode | undefined {

@@ -59,7 +59,10 @@ class MinimaxClient {
     this.customFetch = customFetch;
   }
 
-  async chatCompletions(request: MinimaxRequest): Promise<MinimaxResponse> {
+  async chatCompletions(
+    request: MinimaxRequest,
+    signal?: AbortSignal,
+  ): Promise<MinimaxResponse> {
     const fetchFn = this.customFetch || fetch;
     const response = await fetchFn(`${this.baseURL}/chat/completions`, {
       method: "POST",
@@ -71,6 +74,7 @@ class MinimaxClient {
         ...request,
         stream: false,
       }),
+      signal,
     });
 
     if (!response.ok) {
@@ -96,6 +100,7 @@ class MinimaxClient {
 
   async chatCompletionsStream(
     request: MinimaxRequest,
+    signal?: AbortSignal,
   ): Promise<AsyncIterable<MinimaxStreamChunk>> {
     const fetchFn = this.customFetch || fetch;
     const response = await fetchFn(`${this.baseURL}/chat/completions`, {
@@ -108,6 +113,7 @@ class MinimaxClient {
         ...request,
         stream: true,
       }),
+      signal,
     });
 
     if (!response.ok) {
@@ -1082,23 +1088,31 @@ export const minimaxAdapterFactory: LLMProvider<
   async execute(
     client: unknown,
     request: MinimaxRequest,
+    signal?: AbortSignal,
   ): Promise<MinimaxResponse> {
     const minimaxClient = client as MinimaxClient;
-    return minimaxClient.chatCompletions({
-      ...request,
-      stream: false,
-    });
+    return minimaxClient.chatCompletions(
+      {
+        ...request,
+        stream: false,
+      },
+      signal,
+    );
   },
 
   async executeStream(
     client: unknown,
     request: MinimaxRequest,
+    signal?: AbortSignal,
   ): Promise<AsyncIterable<MinimaxStreamChunk>> {
     const minimaxClient = client as MinimaxClient;
-    return minimaxClient.chatCompletionsStream({
-      ...request,
-      stream: true,
-    });
+    return minimaxClient.chatCompletionsStream(
+      {
+        ...request,
+        stream: true,
+      },
+      signal,
+    );
   },
 
   extractInternalCode(error: unknown): ArchestraInternalErrorCode | undefined {

@@ -815,8 +815,14 @@ export async function convertToolResultsToToon(
 
 interface CohereClient {
   chat: {
-    create: (request: CohereRequest) => Promise<CohereResponse>;
-    stream: (request: CohereRequest) => AsyncIterable<CohereStreamChunk>;
+    create: (
+      request: CohereRequest,
+      signal?: AbortSignal,
+    ) => Promise<CohereResponse>;
+    stream: (
+      request: CohereRequest,
+      signal?: AbortSignal,
+    ) => AsyncIterable<CohereStreamChunk>;
   };
 }
 
@@ -837,7 +843,10 @@ function createCohereClient(
 
   return {
     chat: {
-      create: async (request: CohereRequest): Promise<CohereResponse> => {
+      create: async (
+        request: CohereRequest,
+        signal?: AbortSignal,
+      ): Promise<CohereResponse> => {
         const response = await observableFetch(`${baseUrl}/v2/chat`, {
           method: "POST",
           headers: {
@@ -846,6 +855,7 @@ function createCohereClient(
             ...options.defaultHeaders,
           },
           body: JSON.stringify({ ...request, stream: false }),
+          signal,
         });
 
         if (!response.ok) {
@@ -859,6 +869,7 @@ function createCohereClient(
       },
       stream: async function* (
         request: CohereRequest,
+        signal?: AbortSignal,
       ): AsyncIterable<CohereStreamChunk> {
         const response = await observableFetch(`${baseUrl}/v2/chat`, {
           method: "POST",
@@ -868,6 +879,7 @@ function createCohereClient(
             ...options.defaultHeaders,
           },
           body: JSON.stringify({ ...request, stream: true }),
+          signal,
         });
 
         if (!response.ok) {
@@ -981,8 +993,12 @@ export const cohereAdapterFactory: LLMProvider<
     return new CohereStreamAdapter();
   },
 
-  async execute(client: CohereClient, request: CohereRequest) {
-    const response = await client.chat.create(request);
+  async execute(
+    client: CohereClient,
+    request: CohereRequest,
+    signal?: AbortSignal,
+  ) {
+    const response = await client.chat.create(request, signal);
     logger.debug({ response }, "Cohere raw response");
     if (!response) {
       throw new Error("'Cohere's API has returned an undefined response.");
@@ -990,8 +1006,12 @@ export const cohereAdapterFactory: LLMProvider<
     return response;
   },
 
-  async executeStream(client: CohereClient, request: CohereRequest) {
-    return client.chat.stream(request);
+  async executeStream(
+    client: CohereClient,
+    request: CohereRequest,
+    signal?: AbortSignal,
+  ) {
+    return client.chat.stream(request, signal);
   },
 
   extractErrorMessage,

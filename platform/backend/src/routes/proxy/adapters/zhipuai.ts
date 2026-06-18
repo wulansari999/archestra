@@ -57,7 +57,10 @@ class ZhipuaiClient {
     this.customFetch = customFetch;
   }
 
-  async chatCompletions(request: ZhipuaiRequest): Promise<ZhipuaiResponse> {
+  async chatCompletions(
+    request: ZhipuaiRequest,
+    signal?: AbortSignal,
+  ): Promise<ZhipuaiResponse> {
     const fetchFn = this.customFetch || fetch;
     const response = await fetchFn(`${this.baseURL}/chat/completions`, {
       method: "POST",
@@ -69,6 +72,7 @@ class ZhipuaiClient {
         ...request,
         stream: false,
       }),
+      signal,
     });
 
     if (!response.ok) {
@@ -101,6 +105,7 @@ class ZhipuaiClient {
 
   async chatCompletionsStream(
     request: ZhipuaiRequest,
+    signal?: AbortSignal,
   ): Promise<AsyncIterable<ZhipuaiStreamChunk>> {
     const fetchFn = this.customFetch || fetch;
     const response = await fetchFn(`${this.baseURL}/chat/completions`, {
@@ -113,6 +118,7 @@ class ZhipuaiClient {
         ...request,
         stream: true,
       }),
+      signal,
     });
 
     if (!response.ok) {
@@ -1013,17 +1019,19 @@ export const zhipuaiAdapterFactory: LLMProvider<
   async execute(
     client: unknown,
     request: ZhipuaiRequest,
+    signal?: AbortSignal,
   ): Promise<ZhipuaiResponse> {
     const zhipuaiClient = client as ZhipuaiClient;
-    return zhipuaiClient.chatCompletions(request);
+    return zhipuaiClient.chatCompletions(request, signal);
   },
 
   async executeStream(
     client: unknown,
     request: ZhipuaiRequest,
+    signal?: AbortSignal,
   ): Promise<AsyncIterable<ZhipuaiStreamChunk>> {
     const zhipuaiClient = client as ZhipuaiClient;
-    return zhipuaiClient.chatCompletionsStream(request);
+    return zhipuaiClient.chatCompletionsStream(request, signal);
   },
 
   extractInternalCode(error: unknown): ArchestraInternalErrorCode | undefined {

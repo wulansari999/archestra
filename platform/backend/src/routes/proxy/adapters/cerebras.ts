@@ -1119,20 +1119,22 @@ export const cerebrasAdapterFactory: LLMProvider<
   async execute(
     client: unknown,
     request: CerebrasRequest,
+    signal?: AbortSignal,
   ): Promise<CerebrasResponse> {
     const cerebrasClient = client as OpenAIProvider;
     const cerebrasRequest = {
       ...request,
       stream: false,
     } as unknown as ChatCompletionCreateParamsNonStreaming;
-    return cerebrasClient.chat.completions.create(
-      cerebrasRequest,
-    ) as Promise<CerebrasResponse>;
+    return cerebrasClient.chat.completions.create(cerebrasRequest, {
+      signal,
+    }) as Promise<CerebrasResponse>;
   },
 
   async executeStream(
     client: unknown,
     request: CerebrasRequest,
+    signal?: AbortSignal,
   ): Promise<AsyncIterable<CerebrasStreamChunk>> {
     const cerebrasClient = client as OpenAIProvider;
     const cerebrasRequest = {
@@ -1140,8 +1142,10 @@ export const cerebrasAdapterFactory: LLMProvider<
       stream: true,
       stream_options: { include_usage: true },
     } as unknown as ChatCompletionCreateParamsStreaming;
-    const stream =
-      await cerebrasClient.chat.completions.create(cerebrasRequest);
+    const stream = await cerebrasClient.chat.completions.create(
+      cerebrasRequest,
+      { signal },
+    );
 
     return {
       [Symbol.asyncIterator]: async function* () {

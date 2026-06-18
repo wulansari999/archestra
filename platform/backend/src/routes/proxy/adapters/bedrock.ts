@@ -1706,6 +1706,7 @@ export const bedrockAdapterFactory: LLMProvider<
   async execute(
     client: unknown,
     request: BedrockRequest,
+    signal?: AbortSignal,
   ): Promise<BedrockResponse> {
     const bedrockClient = client as BedrockClient;
     const { commandInput, toolNameMapping } =
@@ -1715,6 +1716,7 @@ export const bedrockAdapterFactory: LLMProvider<
     const response = await bedrockClient.converse(
       request.modelId,
       commandInput,
+      signal,
     );
 
     // Convert response to our internal format with decoded tool names
@@ -1777,12 +1779,13 @@ export const bedrockAdapterFactory: LLMProvider<
   async executeStream(
     client: unknown,
     request: BedrockRequest,
+    signal?: AbortSignal,
   ): Promise<AsyncIterable<BedrockStreamEventWithRaw>> {
     const bedrockClient = client as BedrockClient;
     const { commandInput } = buildBedrockCommandContext(request);
 
     // Use fetch-based client.converseStream() - returns events with __rawBytes already set
-    return bedrockClient.converseStream(request.modelId, commandInput);
+    return bedrockClient.converseStream(request.modelId, commandInput, signal);
   },
 
   extractInternalCode(error: unknown): ArchestraInternalErrorCode | undefined {
