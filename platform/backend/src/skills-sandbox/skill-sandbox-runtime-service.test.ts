@@ -5,6 +5,7 @@ import {
   SkillSandboxReplayEventModel,
 } from "@/models";
 import { afterEach, describe, expect, test, vi } from "@/test";
+import { asSandboxId } from "@/types";
 import {
   __internals,
   skillSandboxRuntimeService,
@@ -49,7 +50,7 @@ describe("skillSandboxRuntimeService", () => {
   test("runCommand rejects with SkillSandboxError while disabled", async () => {
     await expect(
       skillSandboxRuntimeService.runCommand({
-        sandboxId: __internals.asSandboxId(crypto.randomUUID()),
+        sandboxId: asSandboxId(crypto.randomUUID()),
         caller: { userId: "u", organizationId: "o" },
         command: "echo hi",
       }),
@@ -59,7 +60,7 @@ describe("skillSandboxRuntimeService", () => {
   test("exportArtifact rejects with SkillSandboxError while disabled", async () => {
     await expect(
       skillSandboxRuntimeService.exportArtifact({
-        sandboxId: __internals.asSandboxId(crypto.randomUUID()),
+        sandboxId: asSandboxId(crypto.randomUUID()),
         caller: { userId: "u", organizationId: "o" },
         path: "out/report.txt",
       }),
@@ -76,7 +77,7 @@ describe("skillSandboxRuntimeService", () => {
 
     await expect(
       enabled.runCommand({
-        sandboxId: __internals.asSandboxId(crypto.randomUUID()),
+        sandboxId: asSandboxId(crypto.randomUUID()),
         caller: { userId: "u", organizationId: "o" },
         command: "echo hi",
         timeoutSeconds,
@@ -89,7 +90,7 @@ describe("skillSandboxRuntimeService", () => {
 
     await expect(
       enabled.runCommand({
-        sandboxId: __internals.asSandboxId(crypto.randomUUID()),
+        sandboxId: asSandboxId(crypto.randomUUID()),
         caller: { userId: "u", organizationId: "o" },
         command: "   ",
       }),
@@ -100,7 +101,7 @@ describe("skillSandboxRuntimeService", () => {
     const enabled = await importEnabledService();
     const { SKILL_SANDBOX_LIMITS } = await import("./types");
 
-    const sandboxId = __internals.asSandboxId(crypto.randomUUID());
+    const sandboxId = asSandboxId(crypto.randomUUID());
     // all N+1 calls are created synchronously, so the first N take queue slots
     // (and later fail — no real Dagger engine) while only the last one trips
     // the guard before any await.
@@ -129,7 +130,7 @@ describe("skillSandboxRuntimeService", () => {
     const enabled = await importEnabledService();
     const { SKILL_SANDBOX_LIMITS } = await import("./types");
 
-    const sandboxId = __internals.asSandboxId(crypto.randomUUID());
+    const sandboxId = asSandboxId(crypto.randomUUID());
     await Promise.allSettled(
       Array.from(
         { length: SKILL_SANDBOX_LIMITS.maxSandboxQueueLength + 1 },
@@ -160,7 +161,7 @@ describe("skillSandboxRuntimeService", () => {
   test("a call enqueued right as the previous one settles is not lost", async () => {
     const enabled = await importEnabledService();
 
-    const sandboxId = __internals.asSandboxId(crypto.randomUUID());
+    const sandboxId = asSandboxId(crypto.randomUUID());
     const run = () =>
       enabled.runCommand({
         sandboxId,
@@ -448,7 +449,7 @@ describe("stageConversationAttachments (db)", () => {
     if (upload?.kind !== "upload") throw new Error("expected an upload event");
     // filename is sanitized (space -> underscore) and lands under the dir.
     expect(upload.upload.path).toBe("/home/sandbox/attachments/pi_mc.gif");
-    expect(upload.upload.data.toString("utf8")).toBe("GIF89a-bytes");
+    expect(upload.upload.data?.toString("utf8")).toBe("GIF89a-bytes");
     expect(upload.upload.sourceAttachmentId).not.toBeNull();
   });
 
@@ -623,6 +624,7 @@ describe("uploadFile dedupeId idempotency (db)", () => {
     // First insert — should create a file row and a replay event.
     const row1 = await SkillSandboxReplayEventModel.appendUpload({
       sandboxId: sandbox.id,
+      userId: user.id,
       path: "/home/sandbox/hooks/h/script.py",
       mimeType: "text/x-python",
       originalName: null,
@@ -636,6 +638,7 @@ describe("uploadFile dedupeId idempotency (db)", () => {
     // Second append with the same dedupeId — ON CONFLICT → returns null (no-op).
     const row2 = await SkillSandboxReplayEventModel.appendUpload({
       sandboxId: sandbox.id,
+      userId: user.id,
       path: "/home/sandbox/hooks/h/script.py",
       mimeType: "text/x-python",
       originalName: null,
@@ -662,6 +665,7 @@ describe("uploadFile dedupeId idempotency (db)", () => {
     const otherDedupeId = crypto.randomUUID();
     const row3 = await SkillSandboxReplayEventModel.appendUpload({
       sandboxId: sandbox.id,
+      userId: user.id,
       path: "/home/sandbox/hooks/h/other.py",
       mimeType: "text/x-python",
       originalName: null,
@@ -680,6 +684,7 @@ describe("uploadFile dedupeId idempotency (db)", () => {
     // An upload without a sourceAttachmentId (no dedupeId) also appends normally.
     const row4 = await SkillSandboxReplayEventModel.appendUpload({
       sandboxId: sandbox.id,
+      userId: user.id,
       path: "/home/sandbox/hooks/h/payload.json",
       mimeType: "application/json",
       originalName: null,

@@ -3,12 +3,16 @@ import {
   ADMIN_ROLE_NAME,
   TOOL_DOWNLOAD_FILE_FULL_NAME,
   TOOL_RUN_COMMAND_FULL_NAME,
+  TOOL_SAVE_RESULT_FULL_NAME,
+  TOOL_SEARCH_FILES_FULL_NAME,
   TOOL_UPLOAD_FILE_FULL_NAME,
 } from "@archestra/shared";
 import config from "@/config";
 import {
   ConversationAttachmentModel,
   ConversationModel,
+  FileModel,
+  ProjectModel,
   SkillModel,
   SkillSandboxModel,
   SkillSandboxReplayEventModel,
@@ -212,6 +216,60 @@ describe("sandbox tools (runtime enabled)", () => {
         cwd: undefined,
         timeoutSeconds: undefined,
       });
+    });
+
+    test("surfaces the truncation warning before stdout", async () => {
+      const ctx = await makeConversationCtx();
+      vi.spyOn(skillSandboxRuntimeService, "runCommand").mockResolvedValue({
+        commandId: "cmd-1",
+        sandboxId: "x" as any,
+        command: "cat big",
+        cwd: null,
+        stdout: "partial output\n",
+        stderr: "",
+        exitCode: 0,
+        durationMs: 5,
+        timedOut: false,
+        truncated: true,
+        stagingNotices: [],
+      });
+
+      const result = await executeArchestraTool(
+        TOOL_RUN_COMMAND_FULL_NAME,
+        { command: "cat big" },
+        ctx,
+      );
+      const text = textOf(result);
+      expect(text).toContain("Output was truncated");
+      // the model must see the warning before it starts reading the blob.
+      expect(text.indexOf("Output was truncated")).toBeLessThan(
+        text.indexOf("stdout:"),
+      );
+      // the old trailing marker is gone — no duplicate warning at the end.
+      expect(text).not.toContain("(output was truncated)");
+    });
+
+    test("omits the truncation warning when output is complete", async () => {
+      const ctx = await makeConversationCtx();
+      stubRunCommand("x");
+
+      const result = await executeArchestraTool(
+        TOOL_RUN_COMMAND_FULL_NAME,
+        { command: "echo hi" },
+        ctx,
+      );
+      expect(textOf(result)).not.toContain("truncated");
+    });
+
+    test("guides to timeoutSeconds when the model passes timeout", async () => {
+      const ctx = await makeConversationCtx();
+      const result = await executeArchestraTool(
+        TOOL_RUN_COMMAND_FULL_NAME,
+        { command: "echo hi", timeout: 5 } as any,
+        ctx,
+      );
+      expect(result.isError).toBe(true);
+      expect(textOf(result)).toContain('did you mean "timeoutSeconds"?');
     });
 
     test("reuses the same default sandbox across calls in a conversation", async () => {
@@ -693,7 +751,7 @@ describe("sandbox tools (runtime enabled)", () => {
         expect(uploads).toHaveLength(1);
         const [only] = uploads;
         if (only.kind !== "upload") throw new Error("expected an upload event");
-        expect(only.upload.data.toString("utf8")).toBe(bytes.toString("utf8"));
+        expect(only.upload.data?.toString("utf8")).toBe(bytes.toString("utf8"));
         expect(only.upload.path).toBe("/home/sandbox/data/input.csv");
       });
 
@@ -826,6 +884,616 @@ describe("sandbox tools (runtime enabled)", () => {
         expect(result.isError).toBe(true);
         expect(textOf(result)).toContain("no longer exists");
       });
+    });
+  });
+});
+
+describe("PFS tools (search_files, my_file source, download_file project)", () => {
+  let agent: Agent;
+  let organizationId: string;
+  let userId: string;
+  let context: ArchestraContext;
+  const originalEnabled = config.skillsSandbox.enabled;
+
+  beforeAll(() => {
+    (config.skillsSandbox as { enabled: boolean }).enabled = true;
+  });
+  afterAll(() => {
+    (config.skillsSandbox as { enabled: boolean }).enabled = originalEnabled;
+  });
+
+  beforeEach(
+    async ({
+      makeAgent,
+      makeUser,
+      makeMember,
+      seedAndAssignArchestraTools,
+    }) => {
+      agent = await makeAgent({ name: "PFS Agent" });
+      organizationId = agent.organizationId;
+      const user = await makeUser();
+      await makeMember(user.id, organizationId, { role: ADMIN_ROLE_NAME });
+      userId = user.id;
+      await seedAndAssignArchestraTools(agent.id);
+      context = {
+        agent: { id: agent.id, name: agent.name },
+        agentId: agent.id,
+        organizationId,
+        userId,
+      };
+    },
+  );
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  async function makeConversationCtx(): Promise<ArchestraContext> {
+    const conversation = await ConversationModel.create({
+      userId,
+      organizationId,
+      agentId: agent.id,
+      title: "PFS Test",
+    });
+    return { ...context, conversationId: conversation.id };
+  }
+
+  async function seedPfsArtifact(filename: string, content = "abc") {
+    const sandbox = await SkillSandboxModel.create({
+      organizationId,
+      userId,
+      conversationId: null,
+      defaultCwd: "/home/sandbox",
+    });
+    return FileModel.create({
+      organizationId,
+      userId,
+      projectId: null,
+      conversationId: null,
+      sandboxId: sandbox.id,
+      filename,
+      mimeType: "text/plain",
+      sizeBytes: content.length,
+      data: Buffer.from(content),
+    });
+  }
+
+  describe("search_files", () => {
+    test("lists and filters the user's persistent files", async () => {
+      await seedPfsArtifact("q2-report.txt");
+      await seedPfsArtifact("notes.txt");
+
+      const all = await executeArchestraTool(
+        TOOL_SEARCH_FILES_FULL_NAME,
+        {},
+        context,
+      );
+      expect(all.isError).toBe(false);
+      const allOut = structuredOf<{
+        files: Array<{ filename: string; id: string | null }>;
+      }>(all);
+      expect(allOut.files.map((f) => f.filename).sort()).toEqual([
+        "notes.txt",
+        "q2-report.txt",
+      ]);
+      expect(allOut.files.every((f) => f.id)).toBe(true);
+
+      const filtered = await executeArchestraTool(
+        TOOL_SEARCH_FILES_FULL_NAME,
+        { query: "REPORT" },
+        context,
+      );
+      const filteredOut = structuredOf<{ files: Array<{ filename: string }> }>(
+        filtered,
+      );
+      expect(filteredOut.files.map((f) => f.filename)).toEqual([
+        "q2-report.txt",
+      ]);
+      expect(textOf(filtered)).toContain("q2-report.txt");
+    });
+
+    test("never returns another user's files", async ({ makeUser }) => {
+      await seedPfsArtifact("mine.txt");
+      const stranger = await makeUser({ email: "pfs-stranger@test.com" });
+      const strangerSandbox = await SkillSandboxModel.create({
+        organizationId,
+        userId: stranger.id,
+        conversationId: null,
+        defaultCwd: "/home/sandbox",
+      });
+      await FileModel.create({
+        organizationId,
+        userId: stranger.id,
+        projectId: null,
+        conversationId: null,
+        sandboxId: strangerSandbox.id,
+        filename: "theirs.txt",
+        mimeType: "text/plain",
+        sizeBytes: 1,
+        data: Buffer.from("x"),
+      });
+
+      const result = await executeArchestraTool(
+        TOOL_SEARCH_FILES_FULL_NAME,
+        {},
+        context,
+      );
+      const out = structuredOf<{ files: Array<{ filename: string }> }>(result);
+      expect(out.files.map((f) => f.filename)).toEqual(["mine.txt"]);
+    });
+  });
+
+  describe("upload_file my_file source", () => {
+    test("loads PFS bytes by id and marks the upload origin", async () => {
+      const ctx = await makeConversationCtx();
+      const artifact = await seedPfsArtifact("pull-me.txt", "pfs-bytes");
+      const spy = vi
+        .spyOn(skillSandboxRuntimeService, "uploadFile")
+        .mockResolvedValue({
+          uploadId: "up-x",
+          sandboxId: "sb" as any,
+          path: "/home/sandbox/pull-me.txt",
+          mimeType: "text/plain",
+          sizeBytes: 9,
+        });
+
+      const result = await executeArchestraTool(
+        TOOL_UPLOAD_FILE_FULL_NAME,
+        {
+          path: "pull-me.txt",
+          source: { type: "my_file", id: artifact.id },
+        },
+        ctx,
+      );
+      expect(result.isError).toBe(false);
+      expect(spy).toHaveBeenCalledOnce();
+      const call = spy.mock.calls[0][0];
+      expect(call.origin).toBe("my_file");
+      expect(call.data.toString()).toBe("pfs-bytes");
+      expect(call.originalName).toBe("pull-me.txt");
+    });
+
+    test("rejects an unknown reference with a search_files hint", async () => {
+      const ctx = await makeConversationCtx();
+      const spy = vi.spyOn(skillSandboxRuntimeService, "uploadFile");
+      const result = await executeArchestraTool(
+        TOOL_UPLOAD_FILE_FULL_NAME,
+        {
+          path: "x.txt",
+          source: { type: "my_file", filename: "does-not-exist.txt" },
+        },
+        ctx,
+      );
+      expect(result.isError).toBe(true);
+      expect(textOf(result)).toContain("search_files");
+      expect(spy).not.toHaveBeenCalled();
+    });
+
+    test("requires exactly one of id or filename", async () => {
+      const ctx = await makeConversationCtx();
+      const result = await executeArchestraTool(
+        TOOL_UPLOAD_FILE_FULL_NAME,
+        { path: "x.txt", source: { type: "my_file" } },
+        ctx,
+      );
+      expect(result.isError).toBe(true);
+    });
+  });
+
+  describe("download_file project scoping", () => {
+    test("non-project chats export with no project", async () => {
+      const ctx = await makeConversationCtx();
+      const spy = vi
+        .spyOn(skillSandboxRuntimeService, "exportArtifact")
+        .mockResolvedValue({
+          artifactId: "art-0",
+          sandboxId: "sb" as any,
+          path: "/home/sandbox/out.txt",
+          mimeType: "text/plain",
+          sizeBytes: 3,
+          stagingNotices: [],
+        });
+
+      const result = await executeArchestraTool(
+        TOOL_DOWNLOAD_FILE_FULL_NAME,
+        { path: "out.txt" },
+        ctx,
+      );
+      expect(result.isError).toBe(false);
+      expect(spy.mock.calls[0][0].projectId).toBeNull();
+    });
+
+    test("project chats force the project id", async () => {
+      const project = await ProjectModel.create({
+        organizationId,
+        userId,
+        name: "tool-proj",
+        description: null,
+      });
+      const conversation = await ConversationModel.create({
+        userId,
+        organizationId,
+        agentId: agent.id,
+        projectId: project.id,
+        title: "in project",
+      });
+      const ctx = { ...context, conversationId: conversation.id };
+
+      const spy = vi
+        .spyOn(skillSandboxRuntimeService, "exportArtifact")
+        .mockResolvedValue({
+          artifactId: "art-1",
+          sandboxId: "sb" as any,
+          path: "/home/sandbox/out.txt",
+          mimeType: "text/plain",
+          sizeBytes: 3,
+          stagingNotices: [],
+        });
+
+      const result = await executeArchestraTool(
+        TOOL_DOWNLOAD_FILE_FULL_NAME,
+        { path: "out.txt" },
+        ctx,
+      );
+      expect(result.isError).toBe(false);
+      expect(spy.mock.calls[0][0].projectId).toBe(project.id);
+    });
+  });
+});
+
+describe("project file scope (save_result, scoped search/my_file)", () => {
+  let agent: Agent;
+  let organizationId: string;
+  let userId: string;
+  let context: ArchestraContext;
+  const originalEnabled = config.skillsSandbox.enabled;
+
+  beforeAll(() => {
+    (config.skillsSandbox as { enabled: boolean }).enabled = true;
+  });
+  afterAll(() => {
+    (config.skillsSandbox as { enabled: boolean }).enabled = originalEnabled;
+  });
+
+  beforeEach(
+    async ({
+      makeAgent,
+      makeUser,
+      makeMember,
+      seedAndAssignArchestraTools,
+    }) => {
+      agent = await makeAgent({ name: "Scope Agent" });
+      organizationId = agent.organizationId;
+      const user = await makeUser();
+      await makeMember(user.id, organizationId, { role: ADMIN_ROLE_NAME });
+      userId = user.id;
+      await seedAndAssignArchestraTools(agent.id);
+      context = {
+        agent: { id: agent.id, name: agent.name },
+        agentId: agent.id,
+        organizationId,
+        userId,
+      };
+    },
+  );
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  async function makeProjectChatCtx(name: string) {
+    const project = await ProjectModel.create({
+      organizationId,
+      userId,
+      name,
+      description: null,
+    });
+    const conversation = await ConversationModel.create({
+      userId,
+      organizationId,
+      agentId: agent.id,
+      projectId: project.id,
+      title: name,
+    });
+    return {
+      project,
+      ctx: { ...context, conversationId: conversation.id },
+    };
+  }
+
+  async function makePlainChatCtx() {
+    const conversation = await ConversationModel.create({
+      userId,
+      organizationId,
+      agentId: agent.id,
+      title: "plain",
+    });
+    return { ...context, conversationId: conversation.id };
+  }
+
+  const SAVE_RESULT_FULL_NAME = "archestra__save_result";
+
+  test("save_result persists inline content to the PFS root without a project", async () => {
+    const ctx = await makePlainChatCtx();
+    const result = await executeArchestraTool(
+      SAVE_RESULT_FULL_NAME,
+      { filename: "joke.md", content: "# why did the test pass\n" },
+      ctx,
+    );
+    expect(result.isError).toBe(false);
+    const out = structuredOf<{
+      fileId: string;
+      projectName: string | null;
+      downloadUrl: string;
+    }>(result);
+    expect(out.projectName).toBeNull();
+    expect(out.downloadUrl).toBe(`/api/skill-sandbox/artifacts/${out.fileId}`);
+
+    const { FileModel } = await import("@/models");
+    const row = await FileModel.findById(out.fileId);
+    expect(row).not.toBeNull();
+    expect(row?.projectId).toBeNull();
+  });
+
+  test("save_result lands in the project in a project chat", async () => {
+    const { project, ctx } = await makeProjectChatCtx("save-here");
+    const result = await executeArchestraTool(
+      SAVE_RESULT_FULL_NAME,
+      { filename: "result.md", content: "done" },
+      ctx,
+    );
+    expect(result.isError).toBe(false);
+    const out = structuredOf<{ fileId: string; projectName: string }>(result);
+    expect(out.projectName).toBe("save-here");
+
+    const { FileModel } = await import("@/models");
+    const row = await FileModel.findById(out.fileId);
+    expect(row?.projectId).toBe(project.id);
+  });
+
+  test("save_result validates filename, content presence, and size", async () => {
+    const ctx = await makePlainChatCtx();
+    const badName = await executeArchestraTool(
+      SAVE_RESULT_FULL_NAME,
+      { filename: "../escape.md", content: "x" },
+      ctx,
+    );
+    expect(badName.isError).toBe(true);
+
+    const empty = await executeArchestraTool(
+      SAVE_RESULT_FULL_NAME,
+      { filename: "empty.md", content: "" },
+      ctx,
+    );
+    expect(empty.isError).toBe(true);
+
+    const both = await executeArchestraTool(
+      SAVE_RESULT_FULL_NAME,
+      { filename: "x.md", content: "a", contentBase64: "YQ==" },
+      ctx,
+    );
+    expect(both.isError).toBe(true);
+  });
+
+  test("search_files in a project chat sees only the project's files", async () => {
+    const { project, ctx } = await makeProjectChatCtx("searchable");
+    const { FileModel, SkillSandboxModel } = await import("@/models");
+    const sandbox = await SkillSandboxModel.create({
+      organizationId,
+      userId,
+      conversationId: null,
+      defaultCwd: "/home/sandbox",
+    });
+    await FileModel.create({
+      organizationId,
+      userId,
+      projectId: project.id,
+      conversationId: null,
+      sandboxId: sandbox.id,
+      filename: "inside.txt",
+      mimeType: "text/plain",
+      sizeBytes: 2,
+      data: Buffer.from("in"),
+    });
+    await FileModel.create({
+      organizationId,
+      userId,
+      projectId: null,
+      conversationId: null,
+      sandboxId: sandbox.id,
+      filename: "outside.txt",
+      mimeType: "text/plain",
+      sizeBytes: 3,
+      data: Buffer.from("out"),
+    });
+
+    const result = await executeArchestraTool(
+      TOOL_SEARCH_FILES_FULL_NAME,
+      {},
+      ctx,
+    );
+    const out = structuredOf<{
+      files: Array<{ filename: string }>;
+    }>(result);
+    expect(out.files.map((f) => f.filename)).toEqual(["inside.txt"]);
+  });
+
+  test("my_file uploads in a project chat are confined to the project", async () => {
+    const { project, ctx } = await makeProjectChatCtx("confined");
+    const { FileModel, SkillSandboxModel } = await import("@/models");
+    const sandbox = await SkillSandboxModel.create({
+      organizationId,
+      userId,
+      conversationId: null,
+      defaultCwd: "/home/sandbox",
+    });
+    const inside = await FileModel.create({
+      organizationId,
+      userId,
+      projectId: project.id,
+      conversationId: null,
+      sandboxId: sandbox.id,
+      filename: "in.txt",
+      mimeType: "text/plain",
+      sizeBytes: 2,
+      data: Buffer.from("in"),
+    });
+    const outside = await FileModel.create({
+      organizationId,
+      userId,
+      projectId: null,
+      conversationId: null,
+      sandboxId: sandbox.id,
+      filename: "out.txt",
+      mimeType: "text/plain",
+      sizeBytes: 3,
+      data: Buffer.from("out"),
+    });
+
+    const spy = vi
+      .spyOn(skillSandboxRuntimeService, "uploadFile")
+      .mockResolvedValue({
+        uploadId: "up-1",
+        sandboxId: "sb" as any,
+        path: "/home/sandbox/in.txt",
+        mimeType: "text/plain",
+        sizeBytes: 2,
+      });
+
+    const ok = await executeArchestraTool(
+      TOOL_UPLOAD_FILE_FULL_NAME,
+      { path: "in.txt", source: { type: "my_file", id: inside.id } },
+      ctx,
+    );
+    expect(ok.isError).toBe(false);
+    expect(spy.mock.calls[0][0].data.toString()).toBe("in");
+
+    const denied = await executeArchestraTool(
+      TOOL_UPLOAD_FILE_FULL_NAME,
+      { path: "out.txt", source: { type: "my_file", id: outside.id } },
+      ctx,
+    );
+    expect(denied.isError).toBe(true);
+    expect(textOf(denied)).toContain("project");
+  });
+});
+
+describe("projects feature gating (search_files / save_result / my_file)", () => {
+  const originalSandbox = config.skillsSandbox.enabled;
+  const originalProjects = config.projects.enabled;
+
+  beforeAll(() => {
+    (config.skillsSandbox as { enabled: boolean }).enabled = true;
+  });
+  afterAll(() => {
+    (config.skillsSandbox as { enabled: boolean }).enabled = originalSandbox;
+    (config.projects as { enabled: boolean }).enabled = originalProjects;
+  });
+
+  afterEach(() => {
+    (config.projects as { enabled: boolean }).enabled = originalProjects;
+    vi.restoreAllMocks();
+  });
+
+  test("tools/list hides the PFS tools when projects is off, keeps the rest", () => {
+    (config.projects as { enabled: boolean }).enabled = false;
+    const off = getArchestraMcpTools().map((tool) => tool.name);
+    expect(off).not.toContain(TOOL_SEARCH_FILES_FULL_NAME);
+    expect(off).not.toContain(TOOL_SAVE_RESULT_FULL_NAME);
+    // the non-gated sandbox surface is still advertised
+    expect(off).toContain(TOOL_RUN_COMMAND_FULL_NAME);
+    expect(off).toContain(TOOL_DOWNLOAD_FILE_FULL_NAME);
+    expect(off).toContain(TOOL_UPLOAD_FILE_FULL_NAME);
+
+    (config.projects as { enabled: boolean }).enabled = true;
+    const on = getArchestraMcpTools().map((tool) => tool.name);
+    for (const name of [
+      TOOL_SEARCH_FILES_FULL_NAME,
+      TOOL_SAVE_RESULT_FULL_NAME,
+      TOOL_RUN_COMMAND_FULL_NAME,
+      TOOL_DOWNLOAD_FILE_FULL_NAME,
+      TOOL_UPLOAD_FILE_FULL_NAME,
+    ]) {
+      expect(on).toContain(name);
+    }
+  });
+
+  describe("with the runtime active", () => {
+    let context: ArchestraContext;
+    let userId: string;
+    let organizationId: string;
+    let agentId: string;
+
+    beforeEach(
+      async ({
+        makeAgent,
+        makeUser,
+        makeMember,
+        seedAndAssignArchestraTools,
+      }) => {
+        const agent = await makeAgent({ name: "Gate Agent" });
+        organizationId = agent.organizationId;
+        agentId = agent.id;
+        const user = await makeUser();
+        await makeMember(user.id, organizationId, { role: ADMIN_ROLE_NAME });
+        userId = user.id;
+        await seedAndAssignArchestraTools(agent.id);
+        context = {
+          agent: { id: agent.id, name: agent.name },
+          agentId: agent.id,
+          organizationId,
+          userId,
+        };
+      },
+    );
+
+    test("execute refuses search_files / save_result with -32601 when off", async () => {
+      (config.projects as { enabled: boolean }).enabled = false;
+
+      await expect(
+        executeArchestraTool(TOOL_SEARCH_FILES_FULL_NAME, {}, context),
+      ).rejects.toMatchObject({
+        code: -32601,
+        message: expect.stringContaining(
+          `No tool named "${TOOL_SEARCH_FILES_FULL_NAME}" exists`,
+        ),
+      });
+
+      await expect(
+        executeArchestraTool(
+          TOOL_SAVE_RESULT_FULL_NAME,
+          { filename: "x.txt", content: "hi" },
+          context,
+        ),
+      ).rejects.toMatchObject({
+        code: -32601,
+        message: expect.stringContaining(
+          `No tool named "${TOOL_SAVE_RESULT_FULL_NAME}" exists`,
+        ),
+      });
+    });
+
+    test("upload_file rejects the my_file source when projects is off", async () => {
+      (config.projects as { enabled: boolean }).enabled = false;
+      const conversation = await ConversationModel.create({
+        userId,
+        organizationId,
+        agentId,
+        title: "gate",
+      });
+      const spy = vi.spyOn(skillSandboxRuntimeService, "uploadFile");
+
+      const result = await executeArchestraTool(
+        TOOL_UPLOAD_FILE_FULL_NAME,
+        {
+          path: "x.txt",
+          source: { type: "my_file", filename: "anything.txt" },
+        },
+        { ...context, conversationId: conversation.id },
+      );
+      expect(result.isError).toBe(true);
+      expect(textOf(result)).toContain("my_file");
+      expect(spy).not.toHaveBeenCalled();
     });
   });
 });

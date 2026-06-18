@@ -1,6 +1,7 @@
 import type { archestraApiTypes } from "@archestra/shared";
-import { Github, Globe, Upload } from "lucide-react";
+import { FolderGit2, Github, Globe, Upload } from "lucide-react";
 import type { ReactNode } from "react";
+import { cn } from "@/lib/utils";
 
 type ConnectorType =
   archestraApiTypes.CreateConnectorData["body"]["connectorType"];
@@ -34,6 +35,10 @@ const CONNECTOR_ICON_MAP: Partial<Record<ConnectorType, ConnectorIcon>> = {
     kind: "element",
     render: (className) => <Globe className={className} />,
   },
+  perforce: {
+    kind: "element",
+    render: (className) => <FolderGit2 className={className} />,
+  },
 };
 
 export function hasConnectorIcon(type: string): boolean {
@@ -54,5 +59,11 @@ export function ConnectorTypeIcon({
     return <>{icon.render(className)}</>;
   }
 
-  return <img src={icon.src} alt={type} className={className} />;
+  return (
+    <img
+      src={icon.src}
+      alt={type}
+      className={cn("shrink-0 object-contain", className)}
+    />
+  );
 }

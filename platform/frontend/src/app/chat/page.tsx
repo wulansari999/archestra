@@ -99,6 +99,10 @@ import {
   getSsoSignInRedirectPath,
 } from "@/lib/auth/sso-sign-in-attempt";
 import {
+  clearAllAppDiagnostics,
+  drainAppDiagnostics,
+} from "@/lib/chat/app-diagnostics-store";
+import {
   fetchConversationEnabledTools,
   useCompactConversation,
   useConversation,
@@ -131,6 +135,7 @@ import {
   getPendingActions,
 } from "@/lib/chat/pending-tool-state";
 import {
+  agentRequiresPerUserConnect,
   deriveModelSource,
   getSavedAgent,
   saveAgent,
@@ -143,7 +148,9 @@ import {
   type SupportedProvider,
   useLlmProviderApiKeys,
 } from "@/lib/llm-provider-api-keys.query";
+import { useArchestraMcpIdentity } from "@/lib/mcp/archestra-mcp-server";
 import { useOrganization } from "@/lib/organization.query";
+import { useProjectFiles } from "@/lib/projects/projects.query";
 import { useTeams } from "@/lib/teams/team.query";
 import { cn } from "@/lib/utils";
 import {
@@ -577,6 +584,13 @@ export function ChatPageContent({
     [router],
   );
 
+  // App render diagnostics are conversation-scoped: drop any leftovers when
+  // switching conversations so they never attach to an unrelated send.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: deliberately re-runs on conversation switch
+  useEffect(() => {
+    clearAllAppDiagnostics();
+  }, [conversationId]);
+
   // Fetch conversation with messages
   const { data: conversation, isLoading: isLoadingConversation } =
     useConversation(conversationId);
@@ -701,6 +715,44 @@ export function ChatPageContent({
     initialAgentId,
     internalAgents,
     organization?.defaultModelId,
+  ]);
+
+  // A shared agent can pin a per-user-credential model (e.g. GitHub Copilot).
+  // When the viewer hasn't connected their own account that model is not in
+  // their available list; keep it selected (no silent swap) so sending it
+  // surfaces an inline connect prompt instead of substituting another provider.
+  // Returns whether the per-user connect prompt applies and, if so, the agent's
+  // resolved model name — so the read-only chip can show "gpt-4" instead of the
+  // model's UUID (which the viewer can't resolve without access to the key).
+  const initialPerUserConnect = useMemo(() => {
+    const agent = internalAgents.find((a) => a.id === initialAgentId);
+    return {
+      needsConnect: agentRequiresPerUserConnect({
+        agent,
+        selectedModelId: initialModel,
+        isModelAvailable: chatModels.some((m) => m.dbId === initialModel),
+      }),
+      modelName: agent?.resolvedLlmModelName ?? undefined,
+    };
+  }, [internalAgents, initialAgentId, initialModel, chatModels]);
+
+  const conversationPerUserConnect = useMemo(() => {
+    const agent = internalAgents.find((a) => a.id === conversation?.agentId);
+    return {
+      needsConnect: agentRequiresPerUserConnect({
+        agent,
+        selectedModelId: conversation?.modelId,
+        isModelAvailable: chatModels.some(
+          (m) => m.dbId === conversation?.modelId,
+        ),
+      }),
+      modelName: agent?.resolvedLlmModelName ?? undefined,
+    };
+  }, [
+    internalAgents,
+    conversation?.agentId,
+    conversation?.modelId,
+    chatModels,
   ]);
 
   // Get selected model's context length for the context indicator
@@ -934,19 +986,42 @@ export function ChatPageContent({
   // selector is deterministic and survives transient section unmounts (the
   // previous mount-effect registry could empty when a single canvas's section
   // briefly unmounted).
+  const { getToolShortName: getArchestraToolShortName } =
+    useArchestraMcpIdentity();
   const mcpCanvases = useMemo(
     () =>
       deriveCanvasesFromMessages(
         messages,
         chatSession?.earlyToolUiStarts ?? {},
+        getArchestraToolShortName,
       ),
-    [messages, chatSession?.earlyToolUiStarts],
+    [messages, chatSession?.earlyToolUiStarts, getArchestraToolShortName],
   );
   const sendMessage = chatSession?.sendMessage;
   const regenerateUserMessage = chatSession?.regenerateUserMessage;
   const status = chatSession?.status ?? "ready";
   const setMessages = chatSession?.setMessages;
   const stop = chatSession?.stop;
+
+  // After the user connects a per-user provider (e.g. GitHub Copilot) via the
+  // inline auth card, re-run their original prompt automatically. The connect
+  // mutation already invalidated the model/key caches; find the last user
+  // message and regenerate its turn. A no-op while a turn is in flight so a
+  // connect can't double-send.
+  const handleProviderConnected = useCallback(() => {
+    if (status === "submitted" || status === "streaming") return;
+    if (!regenerateUserMessage) return;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const message = messages[i];
+      if (message.role !== "user") continue;
+      const partIndex = message.parts.findIndex((part) => part.type === "text");
+      if (partIndex < 0) return;
+      const part = message.parts[partIndex];
+      const text = "text" in part ? part.text : "";
+      void regenerateUserMessage({ messageId: message.id, partIndex, text });
+      return;
+    }
+  }, [messages, regenerateUserMessage, status]);
   // Hide the error while the session is auto-recovering (retry scheduled or
   // reattaching to the still-running response) — flashing a "connection
   // error" card for a turn that restores itself a second later reads as
@@ -974,6 +1049,7 @@ export function ChatPageContent({
     chatSession?.setPendingCustomServerToolCall;
   const tokenUsage = chatSession?.tokenUsage;
   const contextTokensUsed = chatSession?.contextTokensUsed;
+  const contextWindow = chatSession?.contextWindow ?? null;
   const contextCompaction = chatSession?.contextCompaction;
   const recordContextCompaction = chatSession?.recordContextCompaction;
 
@@ -1108,6 +1184,7 @@ export function ChatPageContent({
             compactionId: result.compaction.id,
             originalTokenEstimate: result.compaction.originalTokenEstimate,
             compactedTokenEstimate: result.compaction.compactedTokenEstimate,
+            trigger: "manual",
           });
         }
 
@@ -1120,6 +1197,7 @@ export function ChatPageContent({
             compactionId: result.compaction.id,
             originalTokenEstimate: result.compaction.originalTokenEstimate,
             compactedTokenEstimate: result.compaction.compactedTokenEstimate,
+            trigger: "manual",
           });
         }
 
@@ -1275,12 +1353,16 @@ export function ChatPageContent({
       });
     }
 
+    const initialAppDiagnostics = drainAppDiagnostics();
     sendMessage({
       role: "user",
       parts: ensureNonEmptyParts(parts),
       metadata: {
         createdAt: new Date().toISOString(),
         ...(skillToSend ? { skill: skillToSend } : {}),
+        ...(initialAppDiagnostics.length > 0
+          ? { appDiagnostics: initialAppDiagnostics }
+          : {}),
       },
     });
   }, [
@@ -1430,12 +1512,16 @@ export function ChatPageContent({
       }
     }
 
+    // Attach-once: captured app render diagnostics ride this message's
+    // metadata and the store is drained — a regenerate never re-attaches.
+    const appDiagnostics = drainAppDiagnostics();
     sendMessage?.({
       role: "user",
       parts: ensureNonEmptyParts(parts),
       metadata: {
         createdAt: new Date().toISOString(),
         ...(options?.skill ? { skill: options.skill } : {}),
+        ...(appDiagnostics.length > 0 ? { appDiagnostics } : {}),
       },
     });
   };
@@ -1597,6 +1683,7 @@ export function ChatPageContent({
         modelId: initialModel,
         chatApiKeyId: initialApiKeyId,
         title,
+        projectId: searchParams.get("project"),
       });
       if (!input) {
         return false;
@@ -1611,7 +1698,13 @@ export function ChatPageContent({
       });
       return true;
     },
-    [initialAgentId, initialModel, initialApiKeyId, createConversationMutation],
+    [
+      initialAgentId,
+      initialModel,
+      initialApiKeyId,
+      createConversationMutation,
+      searchParams,
+    ],
   );
 
   const handleCreateConversationWithUrl = useCallback(
@@ -1785,6 +1878,21 @@ export function ChatPageContent({
       [submitInitialMessage],
     );
 
+  // A chat started from a project page keeps the Files panel open when the
+  // project already has results — continuity with the project page, which
+  // shows the same folder on its right side. Tracked through a ref (the files
+  // query races conversation creation) and persisted per conversation, since
+  // creation navigates to /chat/<id>, which remounts this component.
+  const { data: startedFromProjectFiles } = useProjectFiles(
+    searchParams.get("project") ?? undefined,
+  );
+  const projectHasFilesRef = useRef(false);
+  useEffect(() => {
+    if ((startedFromProjectFiles?.length ?? 0) > 0) {
+      projectHasFilesRef.current = true;
+    }
+  }, [startedFromProjectFiles]);
+
   // Auto-send message from URL when conditions are met (deep link support)
   useEffect(() => {
     // Skip if already triggered or no user_prompt in URL
@@ -1810,6 +1918,14 @@ export function ChatPageContent({
     pendingPromptRef.current = initialUserPrompt;
 
     createInitialConversation((newConversation) => {
+      // the init effect on the /chat/<id> mount reads this preference and
+      // opens the Files panel (the default tab) for the fresh project chat.
+      if (projectHasFilesRef.current) {
+        localStorage.setItem(
+          conversationStorageKeys(newConversation.id).artifactOpen,
+          "true",
+        );
+      }
       selectConversation(newConversation.id);
     });
   }, [
@@ -2201,6 +2317,7 @@ export function ChatPageContent({
                       chatErrors={conversation?.chatErrors ?? []}
                       compactions={conversation?.compactions ?? []}
                       onRegenerateUserMessage={regenerateUserMessage}
+                      onProviderConnected={handleProviderConnected}
                       error={error}
                       onToolApprovalResponse={
                         addToolApprovalResponse
@@ -2302,6 +2419,8 @@ export function ChatPageContent({
                           tokensUsed={tokensUsed}
                           cachedTokens={tokenUsage?.cacheReadTokens}
                           maxContextLength={selectedModelContextLength}
+                          contextWindow={contextWindow}
+                          lastCompaction={contextCompaction?.lastCompaction}
                           inputModalities={selectedModelInputModalities}
                           agentLlmApiKeyId={
                             conversation?.agent?.llmApiKeyId ?? null
@@ -2316,6 +2435,14 @@ export function ChatPageContent({
                           modelSource={conversationModelSource}
                           onResetModelOverride={
                             handleConversationResetModelOverride
+                          }
+                          agentRequiresPerUserConnect={
+                            conversationPerUserConnect.needsConnect
+                          }
+                          agentModelDisplayName={
+                            conversationPerUserConnect.needsConnect
+                              ? conversationPerUserConnect.modelName
+                              : undefined
                           }
                         />
                         <div className="text-center">
@@ -2429,6 +2556,14 @@ export function ChatPageContent({
                         onAgentChange={handleInitialAgentChange}
                         modelSource={initialModelSource}
                         onResetModelOverride={handleResetModelOverride}
+                        agentRequiresPerUserConnect={
+                          initialPerUserConnect.needsConnect
+                        }
+                        agentModelDisplayName={
+                          initialPerUserConnect.needsConnect
+                            ? initialPerUserConnect.modelName
+                            : undefined
+                        }
                       />
                     </div>
                   </div>

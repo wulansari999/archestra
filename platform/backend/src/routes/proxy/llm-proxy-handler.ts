@@ -12,6 +12,8 @@ import {
   InteractionSourceSchema,
   isProviderApiKeyOptional,
   PROVIDER_BASE_URL_HEADER,
+  providerDisplayNames,
+  providerRequiresPerUserCredential,
   SOURCE_HEADER,
   UNTRUSTED_CONTEXT_HEADER,
 } from "@archestra/shared";
@@ -31,12 +33,14 @@ import {
   LimitValidationService,
   LlmProviderApiKeyModel,
   ModelModel,
+  TeamModel,
   ToolInvocationPolicyModel,
   UserModel,
 } from "@/models";
 import { metrics } from "@/observability";
 import {
   ATTR_ARCHESTRA_COST,
+  ATTR_ARCHESTRA_USAGE_CACHE_CREATION_1H_INPUT_TOKENS,
   ATTR_GENAI_COMPLETION,
   ATTR_GENAI_RESPONSE_FINISH_REASONS,
   ATTR_GENAI_RESPONSE_ID,
@@ -45,8 +49,10 @@ import {
   ATTR_GENAI_USAGE_CACHE_READ_INPUT_TOKENS,
   ATTR_GENAI_USAGE_INPUT_TOKENS,
   ATTR_GENAI_USAGE_OUTPUT_TOKENS,
+  ATTR_GENAI_USAGE_REASONING_OUTPUT_TOKENS,
   ATTR_GENAI_USAGE_TOTAL_TOKENS,
   EVENT_GENAI_CONTENT_COMPLETION,
+  type SpanTeamInfo,
 } from "@/observability/tracing";
 import {
   type Agent,
@@ -132,6 +138,8 @@ export interface LLMProxyContext<TRequest> {
   executionId?: string;
   parentContext?: Context;
   teamIds?: string[];
+  teams?: SpanTeamInfo[];
+  userTeams?: SpanTeamInfo[];
 }
 
 export type LLMProxyAuthOverride = {
@@ -477,6 +485,29 @@ export async function handleLLMProxy<
     }
   }
 
+  // Per-user providers (e.g. GitHub Copilot) require the acting user's own
+  // linked credential. When none resolved, fail fast with an actionable error
+  // pointing at the connect flow — rather than forwarding a keyless request
+  // that the upstream would reject with a generic 401. `internal_code` gives
+  // first-party clients a machine-readable signal (mirrors
+  // ChatErrorCode.ProviderAuthRequired); the connect URL is in the message so
+  // generic OpenAI/Anthropic clients surface something actionable too.
+  if (providerRequiresPerUserCredential(providerName) && !apiKey) {
+    const providerLabel = providerDisplayNames[providerName];
+    const connectUrl = `${config.frontendBaseUrl}/settings`;
+    logger.info(
+      { providerName },
+      `[${providerName}Proxy] no per-user credential for acting user; returning provider_auth_required`,
+    );
+    return reply.status(401).send({
+      error: {
+        message: `${providerLabel} isn't connected for your account. Connect it at ${connectUrl} then retry your request.`,
+        type: "api_authentication_error",
+        internal_code: "provider_auth_required",
+      },
+    });
+  }
+
   // 5. Enforce authentication for keyless providers on external requests
   assertAuthenticatedForKeylessProvider(
     apiKey,
@@ -613,8 +644,19 @@ export async function handleLLMProxy<
     const globalToolPolicy =
       await utils.toolInvocation.getGlobalToolPolicy(resolvedAgentId);
 
-    // Fetch team IDs for policy evaluation context (needed for trusted data evaluation)
-    const teamIds = await AgentTeamModel.getTeamsForAgent(resolvedAgentId);
+    // Fetch the agent's teams (with labels) once. Used both for policy
+    // evaluation context (trusted data) and for trace span team attributes.
+    const teams =
+      await AgentTeamModel.getTeamLabelInfoForAgent(resolvedAgentId);
+    const teamIds = teams.map((team) => team.id);
+
+    // Fetch the requesting user's teams (with labels) for trace span attributes.
+    const userTeams = userId
+      ? await TeamModel.getTeamLabelInfoForUser({
+          userId,
+          organizationId: resolvedAgent.organizationId,
+        })
+      : [];
 
     // Evaluate trusted data policies
     logger.debug(
@@ -840,6 +882,8 @@ export async function handleLLMProxy<
       executionId,
       parentContext,
       teamIds,
+      teams,
+      userTeams,
     };
 
     if (requestAdapter.isStreaming()) {
@@ -944,6 +988,8 @@ async function handleStreaming<
     executionId,
     parentContext,
     teamIds,
+    teams,
+    userTeams,
   } = ctx;
 
   const providerName = provider.provider;
@@ -969,6 +1015,8 @@ async function handleStreaming<
       model: actualModel,
       stream: true,
       agent,
+      teams,
+      userTeams,
       sessionId,
       executionId,
       externalAgentId,
@@ -1077,17 +1125,23 @@ async function handleStreaming<
           llmSpan.setAttribute(ATTR_GENAI_RESPONSE_ID, state.responseId);
         }
         if (state.usage) {
-          llmSpan.setAttribute(
-            ATTR_GENAI_USAGE_INPUT_TOKENS,
-            state.usage.inputTokens,
-          );
+          // Per the GenAI semconv, gen_ai.usage.input_tokens includes cached
+          // tokens. Internally state.usage.inputTokens is uncached-only (cost,
+          // metrics, and DB depend on that), so add cache read/write back for
+          // the span attributes. The uncached value is still derivable as
+          // input_tokens - cache_read.input_tokens - cache_creation.input_tokens.
+          const totalInputTokens =
+            state.usage.inputTokens +
+            (state.usage.cacheReadTokens ?? 0) +
+            (state.usage.cacheWriteTokens ?? 0);
+          llmSpan.setAttribute(ATTR_GENAI_USAGE_INPUT_TOKENS, totalInputTokens);
           llmSpan.setAttribute(
             ATTR_GENAI_USAGE_OUTPUT_TOKENS,
             state.usage.outputTokens,
           );
           llmSpan.setAttribute(
             ATTR_GENAI_USAGE_TOTAL_TOKENS,
-            state.usage.inputTokens + state.usage.outputTokens,
+            totalInputTokens + state.usage.outputTokens,
           );
           if (state.usage.cacheReadTokens) {
             llmSpan.setAttribute(
@@ -1099,6 +1153,18 @@ async function handleStreaming<
             llmSpan.setAttribute(
               ATTR_GENAI_USAGE_CACHE_CREATION_INPUT_TOKENS,
               state.usage.cacheWriteTokens,
+            );
+          }
+          if (state.usage.cacheWrite1hTokens) {
+            llmSpan.setAttribute(
+              ATTR_ARCHESTRA_USAGE_CACHE_CREATION_1H_INPUT_TOKENS,
+              state.usage.cacheWrite1hTokens,
+            );
+          }
+          if (state.usage.reasoningTokens) {
+            llmSpan.setAttribute(
+              ATTR_GENAI_USAGE_REASONING_OUTPUT_TOKENS,
+              state.usage.reasoningTokens,
             );
           }
           const cost = await utils.costOptimization.calculateCost(
@@ -1183,6 +1249,8 @@ async function handleStreaming<
         allToolCallNames,
         reason,
         agent,
+        teams,
+        userTeams,
         sessionId,
         resolvedUser,
         providerName,
@@ -1267,7 +1335,7 @@ async function handleStreaming<
         providerName,
       });
 
-      withSessionContext(sessionId, () =>
+      withSessionContext(sessionId, () => {
         metrics.llm.reportLLMCost(
           providerName,
           agent,
@@ -1275,8 +1343,19 @@ async function handleStreaming<
           costs.actualCost,
           source,
           externalAgentId,
-        ),
-      );
+        );
+        metrics.llm.reportLLMCacheCost(
+          providerName,
+          agent,
+          actualModel,
+          {
+            cacheCost: costs.cacheCost,
+            cacheReadSavings: costs.cacheReadSavings,
+          },
+          source,
+          externalAgentId,
+        );
+      });
 
       try {
         await InteractionModel.create(
@@ -1356,6 +1435,8 @@ async function handleNonStreaming<
     executionId,
     parentContext,
     teamIds,
+    teams,
+    userTeams,
   } = ctx;
 
   const providerName = provider.provider;
@@ -1372,6 +1453,8 @@ async function handleNonStreaming<
     model: actualModel,
     stream: false,
     agent,
+    teams,
+    userTeams,
     sessionId,
     executionId,
     externalAgentId,
@@ -1392,11 +1475,20 @@ async function handleNonStreaming<
       const usage = adapter.getUsage();
       llmSpan.setAttribute(ATTR_GENAI_RESPONSE_MODEL, adapter.getModel());
       llmSpan.setAttribute(ATTR_GENAI_RESPONSE_ID, adapter.getId());
-      llmSpan.setAttribute(ATTR_GENAI_USAGE_INPUT_TOKENS, usage.inputTokens);
+      // Per the GenAI semconv, gen_ai.usage.input_tokens includes cached tokens.
+      // Internally usage.inputTokens is uncached-only (cost, metrics, and DB
+      // depend on that), so add cache read/write back for the span attributes.
+      // The uncached value is still derivable as input_tokens -
+      // cache_read.input_tokens - cache_creation.input_tokens.
+      const totalInputTokens =
+        usage.inputTokens +
+        (usage.cacheReadTokens ?? 0) +
+        (usage.cacheWriteTokens ?? 0);
+      llmSpan.setAttribute(ATTR_GENAI_USAGE_INPUT_TOKENS, totalInputTokens);
       llmSpan.setAttribute(ATTR_GENAI_USAGE_OUTPUT_TOKENS, usage.outputTokens);
       llmSpan.setAttribute(
         ATTR_GENAI_USAGE_TOTAL_TOKENS,
-        usage.inputTokens + usage.outputTokens,
+        totalInputTokens + usage.outputTokens,
       );
       if (usage.cacheReadTokens) {
         llmSpan.setAttribute(
@@ -1408,6 +1500,18 @@ async function handleNonStreaming<
         llmSpan.setAttribute(
           ATTR_GENAI_USAGE_CACHE_CREATION_INPUT_TOKENS,
           usage.cacheWriteTokens,
+        );
+      }
+      if (usage.cacheWrite1hTokens) {
+        llmSpan.setAttribute(
+          ATTR_ARCHESTRA_USAGE_CACHE_CREATION_1H_INPUT_TOKENS,
+          usage.cacheWrite1hTokens,
+        );
+      }
+      if (usage.reasoningTokens) {
+        llmSpan.setAttribute(
+          ATTR_GENAI_USAGE_REASONING_OUTPUT_TOKENS,
+          usage.reasoningTokens,
         );
       }
       const cost = await utils.costOptimization.calculateCost(
@@ -1480,6 +1584,8 @@ async function handleNonStreaming<
         allToolCallNames,
         reason,
         agent,
+        teams,
+        userTeams,
         sessionId,
         resolvedUser,
         providerName,
@@ -1498,7 +1604,7 @@ async function handleNonStreaming<
         providerName,
       });
 
-      withSessionContext(sessionId, () =>
+      withSessionContext(sessionId, () => {
         metrics.llm.reportLLMCost(
           providerName,
           agent,
@@ -1506,8 +1612,19 @@ async function handleNonStreaming<
           costs.actualCost,
           source,
           externalAgentId,
-        ),
-      );
+        );
+        metrics.llm.reportLLMCacheCost(
+          providerName,
+          agent,
+          actualModel,
+          {
+            cacheCost: costs.cacheCost,
+            cacheReadSavings: costs.cacheReadSavings,
+          },
+          source,
+          externalAgentId,
+        );
+      });
 
       await InteractionModel.create(
         buildInteractionRecord({
@@ -1563,7 +1680,7 @@ async function handleNonStreaming<
     providerName,
   });
 
-  withSessionContext(sessionId, () =>
+  withSessionContext(sessionId, () => {
     metrics.llm.reportLLMCost(
       providerName,
       agent,
@@ -1571,8 +1688,16 @@ async function handleNonStreaming<
       costs.actualCost,
       source,
       externalAgentId,
-    ),
-  );
+    );
+    metrics.llm.reportLLMCacheCost(
+      providerName,
+      agent,
+      actualModel,
+      { cacheCost: costs.cacheCost, cacheReadSavings: costs.cacheReadSavings },
+      source,
+      externalAgentId,
+    );
+  });
 
   try {
     await InteractionModel.create(

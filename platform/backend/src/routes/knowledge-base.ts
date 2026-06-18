@@ -1,6 +1,8 @@
 import {
   calculatePaginationMeta,
   createPaginatedResponseSchema,
+  knowledgeFileInlineContentType,
+  MAX_KNOWLEDGE_FILES_PER_UPLOAD,
   PaginationQuerySchema,
   ResourceVisibilityScopeSchema,
   RouteId,
@@ -53,10 +55,7 @@ import {
   SelectKnowledgeBaseSchema,
   UploadedFileProcessingStatusSchema,
 } from "@/types";
-import {
-  isSafeInlineMimeType,
-  sanitizeAttachmentContentType,
-} from "./chat/attachment-content-type";
+import { sanitizeAttachmentContentType } from "./chat/attachment-content-type";
 
 const AssignedAgentSummarySchema = z.object({
   id: z.string(),
@@ -877,10 +876,23 @@ const knowledgeBaseRoutes: FastifyPluginAsyncZod = async (fastify) => {
         }
       } else if (body.credentials) {
         if (connector.secretId) {
-          await secretManager().updateSecret(
-            connector.secretId,
-            body.credentials,
-          );
+          // The edit dialog promises "leave empty to keep existing
+          // credentials" and omits the email/username field when blank, but
+          // updateSecret replaces the whole value — preserve the stored email
+          // so rotating only the token doesn't drop the username.
+          let credentials = body.credentials;
+          if (!credentials.email) {
+            const existing = await secretManager().getSecret(
+              connector.secretId,
+            );
+            const storedEmail = (
+              existing?.secret as Record<string, unknown> | undefined
+            )?.email;
+            if (typeof storedEmail === "string" && storedEmail) {
+              credentials = { ...credentials, email: storedEmail };
+            }
+          }
+          await secretManager().updateSecret(connector.secretId, credentials);
         } else {
           const secret = await secretManager().createSecret(
             body.credentials,
@@ -1359,7 +1371,7 @@ const knowledgeBaseRoutes: FastifyPluginAsyncZod = async (fastify) => {
             }),
         }),
       )
-      .max(20),
+      .max(MAX_KNOWLEDGE_FILES_PER_UPLOAD),
   });
 
   // ===== Knowledge File Routes =====
@@ -1544,13 +1556,16 @@ const knowledgeBaseRoutes: FastifyPluginAsyncZod = async (fastify) => {
         key: file.blobStorageKey,
         dbData: file.fileData,
       });
-      const safeMime = sanitizeAttachmentContentType(file.mimeType);
-      const disposition =
-        download || !isSafeInlineMimeType(safeMime) ? "attachment" : "inline";
+      const inlineContentType = download
+        ? null
+        : knowledgeFileInlineContentType(file.originalName);
+      const contentType =
+        inlineContentType ?? sanitizeAttachmentContentType(file.mimeType);
+      const disposition = inlineContentType ? "inline" : "attachment";
 
       reply.hijack();
       reply.raw.writeHead(200, {
-        "Content-Type": safeMime,
+        "Content-Type": contentType,
         "Content-Disposition": `${disposition}; filename="${encodeURIComponent(file.originalName)}"`,
         "X-Content-Type-Options": "nosniff",
         "Content-Security-Policy": "default-src 'none'; frame-ancestors 'self'",

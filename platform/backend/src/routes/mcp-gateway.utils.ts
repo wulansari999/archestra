@@ -7,6 +7,8 @@ import {
   isAlwaysExposedArchestraToolShortName,
   MCP_APPS_SERVER_EXTENSION_CAPABILITIES,
   MCP_ENTERPRISE_AUTH_EXTENSION_CAPABILITIES,
+  MCP_GATEWAY_OAUTH_SCOPE,
+  MCP_OAUTH_CLIENT_REFERENCE_PREFIX,
   OAUTH_TOKEN_ID_PREFIX,
   parseFullToolName,
   TOOL_QUERY_KNOWLEDGE_SOURCES_SHORT_NAME,
@@ -47,9 +49,11 @@ import {
   InternalMcpCatalogModel,
   KnowledgeBaseConnectorModel,
   KnowledgeBaseModel,
+  McpOauthClientModel,
   McpToolCallModel,
   MemberModel,
   OAuthAccessTokenModel,
+  TeamModel,
   TeamTokenModel,
   ToolModel,
   UserModel,
@@ -67,13 +71,14 @@ import {
   findExternalIdentityProviderById,
 } from "@/services/identity-providers/oidc";
 import { jwksValidator } from "@/services/jwks-validator";
-import type {
-  AgentAccessContext,
-  AgentType,
-  CommonToolCall,
-  SelectTeamToken,
-  SelectUserToken,
-  ToolExposureMode,
+import {
+  type AgentAccessContext,
+  type AgentType,
+  agentOwner,
+  type CommonToolCall,
+  type SelectTeamToken,
+  type SelectUserToken,
+  type ToolExposureMode,
 } from "@/types";
 import type { McpServerCapabilitiesWithExtensions } from "@/types/mcp-capabilities";
 import { deriveAuthMethod } from "@/utils/auth-method";
@@ -169,6 +174,17 @@ export async function createAgentServer(
 
   const agent = await AgentModel.findById(agentId);
   if (!agent) throw new Error(`Agent not found: ${agentId}`);
+
+  // Fetch the agent's teams and the calling user's teams (with labels) for
+  // trace span team attributes.
+  const teams = await AgentTeamModel.getTeamLabelInfoForAgent(agentId);
+  const userTeams =
+    tokenAuth?.userId && tokenAuth.organizationId
+      ? await TeamModel.getTeamLabelInfoForUser({
+          userId: tokenAuth.userId,
+          organizationId: tokenAuth.organizationId,
+        })
+      : [];
 
   // Create a map of Archestra tool names to their titles
   // This is needed because the database schema doesn't include a title field
@@ -363,6 +379,8 @@ export async function createAgentServer(
             toolName: name,
             mcpServerName,
             agent,
+            teams,
+            userTeams,
             agentType: agent.agentType,
             toolCallId: `archestra-${Date.now()}`,
             toolArgs: args,
@@ -460,14 +478,16 @@ export async function createAgentServer(
           toolName: name,
           mcpServerName,
           agent,
+          teams,
+          userTeams,
           agentType: agent.agentType,
           toolCallId,
           toolArgs: args,
           user: mcpUser,
           callback: async (span) => {
-            const r = await mcpClient.executeToolCall(
+            const r = await mcpClient.executeToolCallForOwner(
               toolCall,
-              agentId,
+              agentOwner(agentId),
               tokenAuth,
               {
                 elicitationHandler: async (request) => {
@@ -915,6 +935,19 @@ async function validateOAuthTokenByHash(params: {
       return null;
     }
 
+    // Application (client_credentials) tokens minted for an MCP OAuth client
+    // carry no acting user. Authorize them against the client's allowed gateways
+    // instead of a user's team membership.
+    if (
+      accessToken.referenceId?.startsWith(MCP_OAUTH_CLIENT_REFERENCE_PREFIX)
+    ) {
+      return validateMcpOauthClientToken({
+        accessToken,
+        profileId: params.profileId,
+        organizationId: agent.organizationId,
+      });
+    }
+
     const userId = accessToken.userId;
     if (!userId) {
       return null;
@@ -974,6 +1007,79 @@ async function validateOAuthTokenByHash(params: {
     );
     return null;
   }
+}
+
+/**
+ * Authorize a client_credentials access token minted for an MCP OAuth client.
+ *
+ * These are application tokens (machine-to-machine): there is no acting user,
+ * so authorization is the client's explicit `allowedGatewayIds` list rather
+ * than team membership. The per-gateway check here is the real authorization
+ * gate — a successful result grants access to exactly the requested gateway and
+ * nothing broader (teamId/isOrganizationToken stay null/false, so no downstream
+ * code re-broadens access).
+ *
+ * Note: an MCP OAuth client is a shared application credential with no acting
+ * user, so gateway tools that resolve per-user/dynamic upstream credentials at
+ * call time are not supported — assign shared/org-scoped credentials to those
+ * tools.
+ */
+async function validateMcpOauthClientToken(params: {
+  accessToken: {
+    id: string;
+    clientId: string | null;
+    referenceId: string | null;
+    scopes: string[] | null;
+  };
+  profileId: string;
+  organizationId: string;
+}): Promise<TokenAuthResult | null> {
+  const { accessToken, profileId, organizationId } = params;
+
+  // Require the mcp scope (parallels the llm:proxy scope check on the LLM path).
+  if (!accessToken.scopes?.includes(MCP_GATEWAY_OAUTH_SCOPE)) {
+    return null;
+  }
+  if (!accessToken.clientId) {
+    return null;
+  }
+
+  // findByClientId returns null when the client was deleted or disabled.
+  const oauthClient = await McpOauthClientModel.findByClientId(
+    accessToken.clientId,
+  );
+  if (!oauthClient) {
+    return null;
+  }
+
+  // Defense in depth: the token's referenceId must point at this exact client.
+  if (
+    accessToken.referenceId !==
+    `${MCP_OAUTH_CLIENT_REFERENCE_PREFIX}${oauthClient.id}`
+  ) {
+    return null;
+  }
+
+  // Cross-org tokens are never valid for this gateway.
+  if (oauthClient.organizationId !== organizationId) {
+    return null;
+  }
+
+  // The client must be explicitly scoped to the requested gateway.
+  if (!oauthClient.allowedGatewayIds.includes(profileId)) {
+    logger.warn(
+      { profileId, clientId: oauthClient.clientId },
+      "validateOAuthToken: MCP OAuth client not authorized for this gateway",
+    );
+    return null;
+  }
+
+  return {
+    tokenId: `${OAUTH_TOKEN_ID_PREFIX}${accessToken.id}`,
+    teamId: null,
+    isOrganizationToken: false,
+    organizationId,
+  };
 }
 
 /**
@@ -1544,7 +1650,10 @@ async function buildSearchToolsDescription(
   return `${baseDescription} Available MCP servers for this gateway include: ${catalogSummaries.join(", ")}${remainingText}. Use this tool first when the user names one of these servers or asks for capabilities that may be provided by connected MCP servers.`;
 }
 
-function normalizeToolInputSchema(schema: unknown): McpListTool["inputSchema"] {
+/** @public — also consumed by the app MCP server (mcp-app-gateway.utils.ts). */
+export function normalizeToolInputSchema(
+  schema: unknown,
+): McpListTool["inputSchema"] {
   if (isRecord(schema) && schema.type === "object") {
     return schema as McpListTool["inputSchema"];
   }

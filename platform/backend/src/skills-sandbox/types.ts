@@ -1,4 +1,5 @@
-import type { SandboxId } from "@/types";
+import type { EnvironmentTarget } from "@archestra/sandbox-rs";
+import type { SandboxFileOrigin, SandboxId } from "@/types";
 
 /**
  * Fixed limits exposed to tool-layer schemas and per-sandbox queueing.
@@ -34,6 +35,13 @@ export interface RunCommandParams {
   cwd?: string;
   /** Caller-requested wall-clock cap in seconds; clamped to the configured maximum. */
   timeoutSeconds?: number;
+  /**
+   * The agent's environment isolation target. Omitted runs on the
+   * process-default engine; otherwise the sandbox-core backend builds that
+   * environment's engine address from it. Resolved by the MCP tool from the
+   * agent's `environmentId`.
+   */
+  environment?: EnvironmentTarget;
 }
 
 export interface CommandResult {
@@ -63,6 +71,14 @@ export interface ExportArtifactParams {
   /** Path inside the container, either absolute or relative to `defaultCwd`. */
   path: string;
   mimeType?: string;
+  /** Owning project for the exported file; null = the author's own file. */
+  projectId?: string | null;
+  /**
+   * The agent's environment isolation target. Artifact extraction replays the
+   * recorded commands, so it must target the same engine the sandbox ran on.
+   * Resolved by the MCP tool from the agent's `environmentId`.
+   */
+  environment?: EnvironmentTarget;
 }
 
 export interface ArtifactRef {
@@ -94,6 +110,8 @@ export interface UploadFileParams {
    * appends a new row (existing tool-upload behavior).
    */
   dedupeId?: string;
+  /** How the upload entered the sandbox; 'my_file' = copied from the user's PFS. */
+  origin?: SandboxFileOrigin | null;
 }
 
 export interface UploadRef {

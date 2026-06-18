@@ -17,7 +17,7 @@ import type { FastifyReply } from "fastify";
 import logger from "@/logging";
 import { metrics } from "@/observability";
 import { SESSION_ID_KEY } from "@/observability/request-context";
-import type { SpanUserInfo } from "@/observability/tracing";
+import type { SpanTeamInfo, SpanUserInfo } from "@/observability/tracing";
 import type {
   Agent,
   DualLlmAnalysis,
@@ -82,6 +82,7 @@ export async function calculateInteractionCosts(params: {
   actualCost: number | undefined;
   cacheCost: number | undefined;
   cacheSavings: number | undefined;
+  cacheReadSavings: number | undefined;
 }> {
   const cacheTokens = {
     readTokens: params.usage.cacheReadTokens ?? 0,
@@ -114,6 +115,7 @@ export async function calculateInteractionCosts(params: {
     actualCost,
     cacheCost: cacheBreakdown?.cacheCost,
     cacheSavings: cacheBreakdown?.cacheSavings,
+    cacheReadSavings: cacheBreakdown?.cacheReadSavings,
   };
 }
 
@@ -178,6 +180,7 @@ export function buildInteractionRecord(params: {
     outputTokens: params.usage.outputTokens,
     cacheReadTokens: params.usage.cacheReadTokens ?? null,
     cacheWriteTokens: params.usage.cacheWriteTokens ?? null,
+    cacheWrite1hTokens: params.usage.cacheWrite1hTokens ?? null,
     cost: params.costs.actualCost?.toFixed(10) ?? null,
     baselineCost: params.costs.baselineCost?.toFixed(10) ?? null,
     cacheCost: params.costs.cacheCost?.toFixed(10) ?? null,
@@ -198,6 +201,8 @@ export function recordBlockedToolCallMetrics(params: {
   allToolCallNames: string[];
   reason: string;
   agent: Agent;
+  teams?: SpanTeamInfo[];
+  userTeams?: SpanTeamInfo[];
   sessionId?: string | null;
   resolvedUser?: { id: string; email: string; name: string } | null;
   providerName: SupportedProvider;
@@ -210,6 +215,8 @@ export function recordBlockedToolCallMetrics(params: {
     toolCallNames: params.allToolCallNames,
     blockedReason: params.reason,
     agent: params.agent,
+    teams: params.teams,
+    userTeams: params.userTeams,
     sessionId: params.sessionId,
     agentType: params.agent.agentType ?? undefined,
     user: toSpanUserInfo(params.resolvedUser),

@@ -1,21 +1,34 @@
+import type { EnvironmentTarget } from "@archestra/sandbox-rs";
 import {
   TOOL_DOWNLOAD_FILE_SHORT_NAME,
   TOOL_RUN_COMMAND_SHORT_NAME,
+  TOOL_SAVE_RESULT_SHORT_NAME,
+  TOOL_SEARCH_FILES_SHORT_NAME,
   TOOL_UPLOAD_FILE_SHORT_NAME,
 } from "@archestra/shared";
 import { z } from "zod";
 import config from "@/config";
+import { daggerEnvironmentRuntimeManager } from "@/k8s/dagger-environment-runtime/manager";
 import logger from "@/logging";
 import {
+  AgentModel,
   ConversationAttachmentModel,
+  EnvironmentModel,
+  FileModel,
   SkillSandboxConversationGoneError,
   SkillSandboxModel,
 } from "@/models";
 import { executionSandboxRegistry } from "@/skills-sandbox/execution-sandbox-registry";
+import { resolveArtifactMime } from "@/skills-sandbox/mime-sniff";
+import {
+  type ProjectFileScope,
+  resolveProjectFileScope,
+} from "@/skills-sandbox/project-file-scope";
 import {
   SKILL_SANDBOX_ATTACHMENTS_DIR,
   SKILL_SANDBOX_HOME,
 } from "@/skills-sandbox/runtime-image";
+import { skillSandboxArtifactService } from "@/skills-sandbox/skill-sandbox-artifact-service";
 import { skillSandboxRuntimeService } from "@/skills-sandbox/skill-sandbox-runtime-service";
 import {
   SKILL_SANDBOX_LIMITS,
@@ -156,7 +169,8 @@ const DownloadFileSchema = z
   .describe(
     "Copy a file out of the sandbox into durable storage and return a " +
       "download URL. Use this for any binary or generated output — run_command " +
-      "only returns text. (To read a skill's source files, use load_skill with a path.)",
+      "only returns text. In a project chat the file is saved to the " +
+      "project. (To read a skill's source files, use load_skill with a path.)",
   );
 
 const DownloadFileOutputSchema = z.object({
@@ -208,6 +222,28 @@ const UploadSourceSchema = z.discriminatedUnion("type", [
       originalName: z.string().min(1).optional(),
     })
     .describe("Upload a UTF-8 text file provided inline."),
+  z
+    .strictObject({
+      type: z.literal("my_file"),
+      id: z
+        .string()
+        .trim()
+        .regex(UUID_REGEX, "must be a file id (UUID)")
+        .optional()
+        .describe("Id of a persistent file, as returned by search_files."),
+      filename: z
+        .string()
+        .min(1)
+        .optional()
+        .describe("Exact filename of a persistent file (when you have no id)."),
+    })
+    .refine((v) => (v.id != null) !== (v.filename != null), {
+      message: "provide exactly one of `id` or `filename`",
+    })
+    .describe(
+      "Copy a file from the user's persistent storage (My Files) into the " +
+        "sandbox. Find files with search_files first.",
+    ),
 ]);
 
 type UploadSource = z.infer<typeof UploadSourceSchema>;
@@ -222,8 +258,12 @@ const UploadFileSchema = z
           "/home/sandbox, or relative to the sandbox's working directory.",
       ),
     source: UploadSourceSchema.describe(
-      "Where the file bytes come from: a chat attachment, inline base64, or " +
-        "inline text. Use this to place input bytes; to create a file the " +
+      "Where the file bytes come from. One of four shapes, each tagged by a " +
+        '`type`: a chat attachment (`{"type":"chat_attachment","attachmentId":...}`), ' +
+        'inline base64 (`{"type":"base64","dataBase64":...}`), inline text ' +
+        '(`{"type":"text","text":"print(1)"}`), or a file from the user\'s ' +
+        'persistent storage (`{"type":"my_file","filename":...}`, found via ' +
+        "search_files). Use this to place input bytes; to create a file the " +
         "sandbox will then run or read, write it with run_command instead.",
     ),
     target: SandboxTargetSchema,
@@ -242,6 +282,76 @@ const UploadFileOutputSchema = z.object({
   sizeBytes: z.number(),
 });
 
+const SearchFilesSchema = z
+  .strictObject({
+    query: z
+      .string()
+      .min(1)
+      .optional()
+      .describe(
+        "Case-insensitive substring matched against filenames. Omit to list everything.",
+      ),
+  })
+  .describe(
+    "Search the user's persistent file storage (My Files): files exported " +
+      "from sandboxes across ALL conversations. In a project chat, searches " +
+      "the project's files instead.",
+  );
+
+const SearchFilesOutputSchema = z.object({
+  files: z.array(
+    z.object({
+      id: z.string().nullable(),
+      filename: z.string(),
+      mimeType: z.string(),
+      sizeBytes: z.number(),
+      createdAt: z.string(),
+    }),
+  ),
+});
+
+const SaveResultSchema = z
+  .strictObject({
+    filename: z
+      .string()
+      .min(1)
+      .max(256)
+      .describe(
+        'Plain filename including extension (e.g. "joke.md"). No paths.',
+      ),
+    content: z.string().optional().describe("UTF-8 text content of the file."),
+    contentBase64: z
+      .string()
+      .min(1)
+      .optional()
+      .describe("Base64-encoded binary content."),
+    mimeType: z
+      .string()
+      .min(1)
+      .optional()
+      .describe("Optional MIME type. Sniffed from the bytes when omitted."),
+  })
+  .refine((v) => (v.content != null) !== (v.contentBase64 != null), {
+    message: "provide exactly one of `content` or `contentBase64`",
+  })
+  .describe(
+    "Save content straight to the user's persistent file storage — no " +
+      "sandbox needed. In a project chat the file is saved to the project.",
+  );
+
+const SaveResultOutputSchema = z.object({
+  fileId: z.string(),
+  filename: z.string(),
+  projectName: z
+    .string()
+    .nullable()
+    .describe("Owning project when saved in a project chat; null otherwise."),
+  mimeType: z.string(),
+  sizeBytes: z.number(),
+  /** See DownloadFileOutputSchema.downloadUrl. */
+  downloadUrl: z.string(),
+});
+
 const registry = defineArchestraTools([
   defineArchestraTool({
     shortName: TOOL_RUN_COMMAND_SHORT_NAME,
@@ -253,7 +363,7 @@ const registry = defineArchestraTools([
       "runs in a uv project at /home/sandbox: `python3` is the project venv; " +
       "install packages with `uv add --project /home/sandbox <pkg>` (pip is " +
       `disabled). Files the user attached to the chat are auto-staged under ${SKILL_SANDBOX_ATTACHMENTS_DIR}/. ` +
-      "Activated skills are mounted under /skills and are on PYTHONPATH, so " +
+      "Loaded skills are mounted under /skills and are on PYTHONPATH, so " +
       "their modules import directly. Returns stdout, stderr, " +
       "exit code, and timing (text only — use download_file for generated " +
       "files). Requires `sandbox:execute`.",
@@ -277,6 +387,7 @@ const registry = defineArchestraTools([
           command: args.command,
           cwd: args.cwd,
           timeoutSeconds: args.timeoutSeconds,
+          environment: await resolveEnvironmentTarget(context),
         });
 
         logger.info(
@@ -323,12 +434,25 @@ const registry = defineArchestraTools([
       });
       if ("error" in resolved) return errorResult(resolved.error);
 
+      let scope: ProjectFileScope | null;
+      try {
+        scope = await resolveProjectFileScope({
+          conversationId: context.conversationId,
+          userId: guard.userCtx.userId,
+          organizationId: guard.userCtx.organizationId,
+        });
+      } catch (error) {
+        return handleRuntimeError(error, resolved.sandboxId, "download_file");
+      }
+
       try {
         const result = await skillSandboxRuntimeService.exportArtifact({
           sandboxId: resolved.sandboxId,
           caller: guard.userCtx,
           path: args.path,
           mimeType: args.mimeType,
+          projectId: scope?.projectId ?? null,
+          environment: await resolveEnvironmentTarget(context),
         });
 
         logger.info(
@@ -371,7 +495,8 @@ const registry = defineArchestraTools([
     title: "Upload File",
     description:
       "Upload a file into the conversation's sandbox from a chat attachment, " +
-      "inline base64, or inline text. The bytes become part of the sandbox " +
+      "inline base64, inline text, or a file from the user's persistent " +
+      "storage (the my_file source). The bytes become part of the sandbox " +
       "recipe, so the file is present on every later run_command and " +
       `download_file call. Note: files the user attached to the chat are already auto-staged under ${SKILL_SANDBOX_ATTACHMENTS_DIR}/ — use this tool ` +
       "to write inline content, place a file at a specific path, or upload " +
@@ -382,6 +507,12 @@ const registry = defineArchestraTools([
       const guard = ensureUsable(context);
       if ("error" in guard) return errorResult(guard.error);
 
+      if (!config.projects.enabled && args.source.type === "my_file") {
+        return errorResult(
+          "Referencing persistent files (the my_file source) is not available on this deployment.",
+        );
+      }
+
       const resolved = await resolveTarget({
         target: args.target,
         userCtx: guard.userCtx,
@@ -389,10 +520,22 @@ const registry = defineArchestraTools([
       });
       if ("error" in resolved) return errorResult(resolved.error);
 
+      let uploadScope: ProjectFileScope | null;
+      try {
+        uploadScope = await resolveProjectFileScope({
+          conversationId: context.conversationId,
+          userId: guard.userCtx.userId,
+          organizationId: guard.userCtx.organizationId,
+        });
+      } catch (error) {
+        return handleRuntimeError(error, resolved.sandboxId, "upload_file");
+      }
+
       const loaded = await loadUploadSource({
         source: args.source,
         userCtx: guard.userCtx,
         conversationId: context.conversationId,
+        scope: uploadScope,
       });
       if ("error" in loaded) return errorResult(loaded.error);
 
@@ -403,6 +546,9 @@ const registry = defineArchestraTools([
           data: loaded.data,
           mimeType: loaded.mimeType,
           originalName: loaded.originalName,
+          // PFS-sourced uploads are marked so the conversation Files panel
+          // can show which persistent files the agent touched here.
+          origin: args.source.type === "my_file" ? "my_file" : null,
         });
 
         logger.info(
@@ -424,6 +570,179 @@ const registry = defineArchestraTools([
       }
     },
   }),
+  defineArchestraTool({
+    shortName: TOOL_SEARCH_FILES_SHORT_NAME,
+    title: "Search Files",
+    description:
+      "Search the user's persistent file storage (My Files): files exported " +
+      "with download_file across ALL conversations, plus files the user added " +
+      "by hand. Returns metadata only. To work on a found file, copy it into " +
+      "the sandbox with upload_file's my_file source (by `id`, or by " +
+      "`filename`). In a project chat, searches the project's files instead. " +
+      "Requires `sandbox:execute`.",
+    schema: SearchFilesSchema,
+    outputSchema: SearchFilesOutputSchema,
+    async handler({ args, context }) {
+      const guard = ensureUsable(context);
+      if ("error" in guard) return errorResult(guard.error);
+
+      let scope: ProjectFileScope | null;
+      try {
+        scope = await resolveProjectFileScope({
+          conversationId: context.conversationId,
+          userId: guard.userCtx.userId,
+          organizationId: guard.userCtx.organizationId,
+        });
+      } catch (error) {
+        if (error instanceof SkillSandboxError)
+          return errorResult(error.message);
+        throw error;
+      }
+
+      const rows = scope
+        ? await FileModel.listByProject({
+            organizationId: guard.userCtx.organizationId,
+            projectId: scope.projectId,
+          })
+        : await FileModel.listForUser({
+            organizationId: guard.userCtx.organizationId,
+            userId: guard.userCtx.userId,
+          });
+
+      const query = args.query?.toLowerCase() ?? null;
+      const matches = rows.filter(
+        (f) => !query || f.filename.toLowerCase().includes(query),
+      );
+
+      const result = {
+        files: matches.map((f) => ({
+          id: f.id,
+          filename: f.filename,
+          mimeType: f.mimeType,
+          sizeBytes: f.sizeBytes,
+          createdAt: f.createdAt.toISOString(),
+        })),
+      };
+      const summary =
+        matches.length === 0
+          ? "No persistent files matched."
+          : matches
+              .map(
+                (f) =>
+                  `${f.filename} (${f.mimeType}, ${f.sizeBytes} bytes)${f.id ? ` id=${f.id}` : ""}`,
+              )
+              .join("\n");
+      return structuredSuccessResult(result, summary);
+    },
+  }),
+  defineArchestraTool({
+    shortName: TOOL_SAVE_RESULT_SHORT_NAME,
+    title: "Save Result",
+    description:
+      "Save inline content directly to the user's persistent file storage " +
+      "(My Files) and return a download URL — no sandbox roundtrip. Use it " +
+      "for results you produced in the conversation itself (text, markdown, " +
+      "small data files). In a project chat the file is saved to the " +
+      "project. For files generated INSIDE the sandbox, use download_file " +
+      "instead. Requires `sandbox:execute`.",
+    schema: SaveResultSchema,
+    outputSchema: SaveResultOutputSchema,
+    async handler({ args, context }) {
+      const guard = ensureUsable(context);
+      if ("error" in guard) return errorResult(guard.error);
+
+      const filename = args.filename.trim();
+      if (
+        filename.includes("/") ||
+        filename.includes("\\") ||
+        filename.startsWith(".")
+      ) {
+        return errorResult(
+          "filename must be a plain name without paths or a leading dot.",
+        );
+      }
+
+      let data: Buffer;
+      if (args.contentBase64 != null) {
+        if (!BASE64_RE.test(args.contentBase64)) {
+          return errorResult("contentBase64 is not valid base64.");
+        }
+        data = Buffer.from(args.contentBase64, "base64");
+      } else {
+        data = Buffer.from(args.content ?? "", "utf8");
+      }
+      if (data.byteLength === 0) {
+        return errorResult("the file content is empty.");
+      }
+      const limit = config.skillsSandbox.artifactBytesLimit;
+      if (data.byteLength > limit) {
+        return errorResult(
+          `the file is too large (${data.byteLength} bytes > ${limit} byte limit).`,
+        );
+      }
+
+      let scope: ProjectFileScope | null;
+      try {
+        scope = await resolveProjectFileScope({
+          conversationId: context.conversationId,
+          userId: guard.userCtx.userId,
+          organizationId: guard.userCtx.organizationId,
+        });
+      } catch (error) {
+        if (error instanceof SkillSandboxError) {
+          return errorResult(error.message);
+        }
+        throw error;
+      }
+
+      const mimeType = resolveArtifactMime({
+        buffer: data,
+        claimed: args.mimeType,
+      });
+      try {
+        const row = await FileModel.create({
+          organizationId: guard.userCtx.organizationId,
+          userId: guard.userCtx.userId,
+          projectId: scope?.projectId ?? null,
+          conversationId: context.conversationId ?? null,
+          filename,
+          mimeType,
+          sizeBytes: data.byteLength,
+          data,
+        });
+
+        logger.info(
+          {
+            fileId: row.id,
+            sizeBytes: row.sizeBytes,
+            projectScoped: !!scope,
+          },
+          "[Sandbox] result saved to PFS",
+        );
+
+        const downloadUrl = `/api/skill-sandbox/artifacts/${row.id}`;
+        return structuredSuccessResult(
+          {
+            fileId: row.id,
+            filename,
+            projectName: scope?.projectName ?? null,
+            mimeType: row.mimeType,
+            sizeBytes: row.sizeBytes,
+            downloadUrl,
+          },
+          [
+            `Saved ${scope ? `${scope.projectName}/` : ""}${filename} (${row.sizeBytes} bytes) to persistent storage.`,
+            `Download URL (use this for links): ${downloadUrl}`,
+          ].join("\n"),
+        );
+      } catch (error) {
+        if (error instanceof SkillSandboxError) {
+          return errorResult(error.message);
+        }
+        throw error;
+      }
+    },
+  }),
 ] as const);
 
 export const toolEntries = registry.toolEntries;
@@ -434,6 +753,51 @@ export const tools = registry.tools;
 interface UserContext {
   organizationId: string;
   userId: string;
+}
+
+/**
+ * Resolve the Dagger runner host for the calling agent's Environment, so its
+ * sandbox runs on that environment's per-env engine (with the environment's
+ * egress NetworkPolicy). Returns undefined when the agent has no environment,
+ * the environment is missing, or k8s isn't configured — the run then uses the
+ * process-default engine.
+ */
+async function resolveEnvironmentTarget(
+  context: ArchestraContext,
+): Promise<EnvironmentTarget | undefined> {
+  const { organizationId } = context;
+  const agentId = context.agent?.id;
+  if (!agentId || !organizationId) return undefined;
+
+  const agent = await AgentModel.findById(agentId);
+  // Unbound agent → no environment isolation requested; the default engine is
+  // the correct runtime.
+  if (!agent?.environmentId) return undefined;
+
+  // The agent IS bound to an environment, so its sandbox MUST run on that
+  // environment's isolated engine (carrying the environment's egress policy).
+  // Fail closed if that engine can't be resolved — never fall back to the shared
+  // default engine, which would run the agent's code with unrestricted egress
+  // and silently defeat the environment's network isolation.
+  const environment = await EnvironmentModel.findByIdForOrganization(
+    agent.environmentId,
+    organizationId,
+  );
+  if (!environment) {
+    throw new Error(
+      `Agent is bound to environment ${agent.environmentId}, which was not found — refusing to run on the shared runtime.`,
+    );
+  }
+  const target =
+    daggerEnvironmentRuntimeManager.environmentTargetForEnvironment(
+      environment,
+    );
+  if (!target) {
+    throw new Error(
+      `Could not resolve the isolated runtime for environment "${environment.name}" — refusing to run on the shared runtime. Is the orchestrator (Kubernetes) configured?`,
+    );
+  }
+  return target;
 }
 
 /**
@@ -636,8 +1000,10 @@ async function loadUploadSource(params: {
   source: UploadSource;
   userCtx: UserContext;
   conversationId: string | undefined;
+  /** Project file scope of the conversation; confines my_file resolution. */
+  scope: ProjectFileScope | null;
 }): Promise<LoadedUpload | { error: string }> {
-  const { source, userCtx, conversationId } = params;
+  const { source, userCtx, conversationId, scope } = params;
   switch (source.type) {
     case "base64": {
       if (!BASE64_RE.test(source.dataBase64)) {
@@ -712,6 +1078,52 @@ async function loadUploadSource(params: {
         originalName: attachment.originalName,
       };
     }
+    case "my_file": {
+      const resolved = await skillSandboxArtifactService.resolveMyFileSource({
+        organizationId: userCtx.organizationId,
+        userId: userCtx.userId,
+        id: source.id,
+        filename: source.filename,
+        scope: scope ? { projectId: scope.projectId } : null,
+      });
+      if ("error" in resolved) {
+        const ref = source.id ?? source.filename ?? "";
+        logger.warn(
+          {
+            organizationId: userCtx.organizationId,
+            userId: userCtx.userId,
+            conversationId,
+            ref,
+            reason: resolved.error,
+          },
+          "[Sandbox] rejected my_file upload",
+        );
+        switch (resolved.error) {
+          case "ambiguous":
+            return {
+              error: `Multiple persistent files are named "${source.filename}". Run search_files and use the \`id\` of the one you mean.`,
+            };
+          case "outside_project":
+            return {
+              error:
+                "This chat belongs to a project; only the project's files can be used here. Run search_files to see them.",
+            };
+          case "missing_bytes":
+            return {
+              error: `The persistent file ${ref} exists but its bytes are no longer in storage.`,
+            };
+          default:
+            return {
+              error: `No persistent file ${ref} exists. Run search_files to see what is available.`,
+            };
+        }
+      }
+      return {
+        data: resolved.data,
+        mimeType: resolved.mimeType,
+        originalName: resolved.originalName,
+      };
+    }
   }
 }
 
@@ -727,12 +1139,15 @@ function formatCommandSummary(result: {
   if (result.timedOut) {
     lines.push("The command was killed by the wall-clock timeout.");
   }
+  if (result.truncated) {
+    lines.push(
+      "Output was truncated; re-run with a narrower command " +
+        "(grep/head/tail/sed) to read the rest.",
+    );
+  }
   lines.push("", "stdout:", result.stdout || "(empty)");
   if (result.stderr) {
     lines.push("", "stderr:", result.stderr);
-  }
-  if (result.truncated) {
-    lines.push("", "(output was truncated)");
   }
   return lines.join("\n");
 }
