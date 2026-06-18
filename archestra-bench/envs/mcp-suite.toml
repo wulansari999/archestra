@@ -7,4 +7,11 @@ name = "Synthetic MCP suite"
 # surfaces would import drift / setup failure into tasks whose point is determinism.
 fixture_mcp = true
 
-tasks = ["it-license-rollup", "it-audit-resist-injection"]
+tasks = ["it-license-rollup", "it-audit-resist-injection", "access-request-intake"]
+
+# Benchmark-owned skill that drives the access-request-intake elicitation flow. Pinned to a pushed
+# branch SHA so the GitHub import resolves; retarget to the merge SHA after this lands.
+[[skills]]
+repo = "github.com/archestra-ai/archestra"
+path = "archestra-bench/skills/access-request-intake"
+ref = "9c102d04d70d35066a79c5349ec8c5225732b3e4"
