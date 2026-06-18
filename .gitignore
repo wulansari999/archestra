@@ -32,6 +32,3 @@ docs/superpowers/specs
 archestra-bench/experiments/
 archestra-bench/analyzer/target/
 archestra-bench/**/.trajectory-analysis-*/
-
-# Local skills-eval harness output
-skills-eval/
