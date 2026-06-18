@@ -9,6 +9,7 @@ against a recompute from sales.json); a workbook with hardcoded numbers and no/d
 fails.
 """
 
+import io
 import json
 import os
 import re
@@ -43,7 +44,9 @@ def _sales() -> list[dict]:
 def _workbook():
     path = os.environ.get("BENCH_OUTPUT")
     assert path, "BENCH_OUTPUT is not set -- the agent did not export a workbook"
-    wb = openpyxl.load_workbook(path, data_only=False)
+    # The harness saves the artifact as `artifact.bin`; load from bytes so openpyxl does not reject it
+    # on the extension (it only validates content for a file-like object).
+    wb = openpyxl.load_workbook(io.BytesIO(Path(path).read_bytes()), data_only=False)
     assert len(wb.worksheets) == 1, f"expected a single-worksheet workbook, got {len(wb.worksheets)}"
     return wb.active
 
