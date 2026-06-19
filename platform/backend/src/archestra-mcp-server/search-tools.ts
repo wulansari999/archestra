@@ -16,6 +16,7 @@ import {
 import { archestraMcpBranding } from "./branding";
 import { isToolEnabledForConversation } from "./conversation-tool-filter";
 import { getAgentTools } from "./delegation";
+import { getUnassignedDiscoverableTools } from "./dynamic-tools";
 import {
   defineArchestraTool,
   defineArchestraTools,
@@ -23,7 +24,6 @@ import {
   structuredSuccessResult,
 } from "./helpers";
 import { filterToolNamesByPermission } from "./rbac";
-import { getUnassignedDiscoverableTools } from "./tool-auto-assign";
 
 const SearchToolsArgsSchema = z
   .object({
@@ -283,13 +283,15 @@ async function getSearchableTools(params: {
   const { agentId, conversationId, organizationId, userId } = params;
   const assignedTools = await ToolModel.getMcpToolsByAgent(agentId);
   const assignedNames = new Set(assignedTools.map((tool) => tool.name));
-  // Widened search space: skills reference tools nobody assigned to the agent,
-  // so discovery also spans third-party tools from every catalog the user can
-  // access, plus the sandbox built-ins when the feature is on. Running such a
-  // tool is not silent — run_tool proposes granting it to the agent (or steers
-  // the user to an admin), which keeps these results actionable.
+  // Dynamic tool access: when the agent's "access all tools" setting is on,
+  // discovery also spans third-party tools from every catalog the user can
+  // access, the sandbox built-ins when the feature is on, and
+  // query_knowledge_sources when the user can access a knowledge connector.
+  // run_tool executes such a tool directly without assigning it; the MCP
+  // server's connection policy decides which credential the call uses.
   const discoverableTools = await getUnassignedDiscoverableTools({
     assignedToolNames: assignedNames,
+    agentId,
     userId,
     organizationId,
   });
@@ -320,8 +322,8 @@ async function getSearchableTools(params: {
   const candidates = new Map<string, SearchCandidate>();
   // First occurrence wins on duplicate names: assigned tools come before the
   // discoverable ones, and the discoverable set is ordered newest-first — the
-  // same row the grant flow resolves, so the description shown by search
-  // matches the row a later run_tool grant assigns.
+  // same row resolveDynamicTool picks, so the description shown by search
+  // matches the row a later run_tool call executes.
   for (const tool of filteredTools) {
     if (candidates.has(tool.name)) {
       continue;
@@ -1014,7 +1016,7 @@ function visitSchema(
 // top-level — returning them as results would be redundant noise. But "always-exposed" only
 // holds once a tool is assigned: an unassigned sandbox tool the user can reach
 // via sandbox:execute is NOT top-level, so surface it here so the model can
-// discover it and propose granting it. Meta tools are never useful as results.
+// discover and run it. Meta tools are never useful as results.
 function isExcludedFromSearchResults(
   toolName: string,
   assignedNames: Set<string>,

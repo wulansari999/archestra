@@ -2052,6 +2052,20 @@
       "when": 1781738400001,
       "tag": "0292_fixed_madrox",
       "breakpoints": true
+    },
+    {
+      "idx": 293,
+      "version": "7",
+      "when": 1781803268096,
+      "tag": "0293_dynamic_tool_access",
+      "breakpoints": true
+    },
+    {
+      "idx": 294,
+      "version": "7",
+      "when": 1781839440184,
+      "tag": "0294_projects_and_scheduled_tasks",
+      "breakpoints": true
     }
   ]
 }
