@@ -34,7 +34,7 @@ export { default as ConversationFileTouchModel } from "./conversation-file-touch
 export { default as ConversationShareModel } from "./conversation-share";
 export { default as EnvironmentModel } from "./environment";
 export { default as EnvironmentDefaultUserLimitModel } from "./environment-default-user-limit";
-export { default as FileModel } from "./file";
+export { default as FileModel, FileNameExistsError } from "./file";
 export { default as GithubAppConfigModel } from "./github-app-config";
 export { default as HookFileModel } from "./hook-file";
 export { default as InteractionModel } from "./interaction";
@@ -42,7 +42,6 @@ export { default as InternalMcpCatalogModel } from "./internal-mcp-catalog";
 export { default as InvitationModel } from "./invitation";
 export { default as KbChunkModel } from "./kb-chunk";
 export { default as KbDocumentModel } from "./kb-document";
-export { default as KbUploadedFileModel } from "./kb-uploaded-file";
 export { default as KnowledgeBaseModel } from "./knowledge-base";
 export { default as KnowledgeBaseConnectorModel } from "./knowledge-base-connector";
 export { default as LimitModel, LimitValidationService } from "./limit";

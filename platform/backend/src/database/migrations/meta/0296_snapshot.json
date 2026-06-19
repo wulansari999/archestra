@@ -1,5 +1,5 @@
 {
-  "id": "26b0b04d-4e01-450e-be4b-a30f0bc8d15f",
+  "id": "b4ba3703-a420-4142-8aec-357038c61d65",
   "prevId": "14139e9f-7b90-4bd9-b7f1-68d316a9e6c7",
   "version": "7",
   "dialect": "postgresql",
@@ -4971,122 +4971,6 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.environment_default_user_limits": {
-      "name": "environment_default_user_limits",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "organization_id": {
-          "name": "organization_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "environment_id": {
-          "name": "environment_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "limit_value": {
-          "name": "limit_value",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "model": {
-          "name": "model",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "cleanup_interval": {
-          "name": "cleanup_interval",
-          "type": "varchar",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'calendar_month'"
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "environment_default_user_limits_org_idx": {
-          "name": "environment_default_user_limits_org_idx",
-          "columns": [
-            {
-              "expression": "organization_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "environment_default_user_limits_organization_id_organization_id_fk": {
-          "name": "environment_default_user_limits_organization_id_organization_id_fk",
-          "tableFrom": "environment_default_user_limits",
-          "tableTo": "organization",
-          "columnsFrom": [
-            "organization_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "environment_default_user_limits_environment_id_environments_id_fk": {
-          "name": "environment_default_user_limits_environment_id_environments_id_fk",
-          "tableFrom": "environment_default_user_limits",
-          "tableTo": "environments",
-          "columnsFrom": [
-            "environment_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "environment_default_user_limits_environment_unique": {
-          "name": "environment_default_user_limits_environment_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "environment_id"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
     "public.environments": {
       "name": "environments",
       "schema": "",
@@ -5368,6 +5252,50 @@
             }
           ],
           "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "files_user_filename_uidx": {
+          "name": "files_user_filename_uidx",
+          "columns": [
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "filename",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"files\".\"project_id\" IS NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "files_project_filename_uidx": {
+          "name": "files_project_filename_uidx",
+          "columns": [
+            {
+              "expression": "project_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "filename",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"files\".\"project_id\" IS NOT NULL",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -5887,12 +5815,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "environment_id": {
-          "name": "environment_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
         "session_id": {
           "name": "session_id",
           "type": "varchar",
@@ -6124,21 +6046,6 @@
           "method": "btree",
           "with": {}
         },
-        "interactions_environment_id_idx": {
-          "name": "interactions_environment_id_idx",
-          "columns": [
-            {
-              "expression": "environment_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
         "interactions_session_id_idx": {
           "name": "interactions_session_id_idx",
           "columns": [
@@ -6245,19 +6152,6 @@
           "tableTo": "virtual_api_keys",
           "columnsFrom": [
             "virtual_key_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        },
-        "interactions_environment_id_environments_id_fk": {
-          "name": "interactions_environment_id_environments_id_fk",
-          "tableFrom": "interactions",
-          "tableTo": "environments",
-          "columnsFrom": [
-            "environment_id"
           ],
           "columnsTo": [
             "id"
@@ -11021,6 +10915,12 @@
           "primaryKey": false,
           "notNull": true
         },
+        "slug": {
+          "name": "slug",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
         "description": {
           "name": "description",
           "type": "text",
@@ -11060,6 +10960,27 @@
             },
             {
               "expression": "name",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "projects_org_slug_uidx": {
+          "name": "projects_org_slug_uidx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "slug",
               "isExpression": false,
               "asc": true,
               "nulls": "last"

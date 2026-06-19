@@ -6,7 +6,6 @@ import {
   CONTEXT_WINDOW_BREAKDOWN_EVENT,
   type ContextWindowBreakdown,
   isModelSelectionComplete,
-  ResourceVisibilityScopeSchema,
   RouteId,
   type SupportedProvider,
   TimeInMs,
@@ -54,7 +53,6 @@ import {
   toCollectedRuns,
 } from "@/hooks/hook-run-parts";
 import { extractAndIngestDocuments } from "@/knowledge-base";
-import { fileUploadManager } from "@/knowledge-base/file-upload/file-upload-manager";
 import logger from "@/logging";
 import {
   ActiveChatRunModel,
@@ -143,19 +141,6 @@ import {
 } from "./stream-probe";
 import { repairHarmonyToolName } from "./tool-call-repair";
 import { createToolUiStartTransform } from "./tool-ui-stream";
-
-const PromoteChatAttachmentResultSchema = z.object({
-  filename: z.string(),
-  status: z.enum([
-    "created",
-    "duplicate",
-    "unsupported",
-    "too_large",
-    "extraction_failed",
-    "failed",
-  ]),
-  fileId: z.string().optional(),
-});
 
 function getCorrelationLogFields(traceContext: {
   sessionId?: string;
@@ -1599,56 +1584,6 @@ const chatRoutes: FastifyPluginAsyncZod = async (fastify) => {
       });
       reply.raw.end(attachment.fileData);
       return reply;
-    },
-  );
-
-  fastify.post(
-    "/api/chat/attachments/:id/promote-to-knowledge-file",
-    {
-      schema: {
-        operationId: RouteId.PromoteChatAttachmentToKnowledgeFile,
-        description:
-          "Promote a conversation attachment into a reusable Knowledge File",
-        tags: ["Chat"],
-        params: z.object({ id: UuidIdSchema }),
-        body: z.object({
-          visibility: ResourceVisibilityScopeSchema.default("personal"),
-          teamIds: z.array(z.string()).default([]),
-          agentIds: z.array(z.string()).default([]),
-        }),
-        response: constructResponseSchema(PromoteChatAttachmentResultSchema),
-      },
-    },
-    async ({ params: { id }, body, user, organizationId }, reply) => {
-      const attachment = await ConversationAttachmentModel.findByIdWithData(id);
-      if (!attachment) {
-        throw new ApiError(404, "Attachment not found");
-      }
-      if (attachment.organizationId !== organizationId) {
-        throw new ApiError(404, "Attachment not found");
-      }
-
-      const conversation = await findReadableConversationById({
-        conversationId: attachment.conversationId,
-        userId: user.id,
-        organizationId,
-      });
-      if (!conversation) {
-        throw new ApiError(404, "Attachment not found");
-      }
-
-      const result = await fileUploadManager.uploadKnowledgeFile({
-        organizationId,
-        userId: user.id,
-        name: attachment.originalName,
-        mimeType: attachment.mimeType,
-        contentBuffer: attachment.fileData,
-        visibility: body.visibility,
-        teamIds: body.teamIds,
-        agentIds: body.agentIds,
-      });
-
-      return reply.send(result);
     },
   );
 

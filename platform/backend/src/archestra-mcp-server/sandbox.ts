@@ -1,6 +1,8 @@
 import type { EnvironmentTarget } from "@archestra/sandbox-rs";
 import {
+  TOOL_DELETE_FILE_SHORT_NAME,
   TOOL_DOWNLOAD_FILE_SHORT_NAME,
+  TOOL_EDIT_FILE_SHORT_NAME,
   TOOL_RUN_COMMAND_SHORT_NAME,
   TOOL_SAVE_RESULT_SHORT_NAME,
   TOOL_SEARCH_FILES_SHORT_NAME,
@@ -15,11 +17,14 @@ import {
   ConversationAttachmentModel,
   ConversationFileTouchModel,
   EnvironmentModel,
-  FileModel,
+  FileNameExistsError,
   SkillSandboxConversationGoneError,
   SkillSandboxModel,
 } from "@/models";
 import { executionSandboxRegistry } from "@/skills-sandbox/execution-sandbox-registry";
+import { UnsafePathError } from "@/skills-sandbox/file-path";
+import type { MyFileResolutionError } from "@/skills-sandbox/file-store";
+import { fileStore } from "@/skills-sandbox/file-store";
 import { resolveArtifactMime } from "@/skills-sandbox/mime-sniff";
 import {
   type ProjectFileScope,
@@ -29,7 +34,6 @@ import {
   SKILL_SANDBOX_ATTACHMENTS_DIR,
   SKILL_SANDBOX_HOME,
 } from "@/skills-sandbox/runtime-image";
-import { skillSandboxArtifactService } from "@/skills-sandbox/skill-sandbox-artifact-service";
 import { skillSandboxRuntimeService } from "@/skills-sandbox/skill-sandbox-runtime-service";
 import {
   SKILL_SANDBOX_LIMITS,
@@ -362,6 +366,85 @@ const SaveResultOutputSchema = z.object({
   downloadUrl: z.string(),
 });
 
+const EditFileSchema = z
+  .strictObject({
+    id: z
+      .string()
+      .min(1)
+      .optional()
+      .describe("Id of the file to edit (from search_files / save_result)."),
+    filename: z
+      .string()
+      .min(1)
+      .optional()
+      .describe(
+        "Filename to edit instead of `id`; rejected as ambiguous if more than one file shares the name.",
+      ),
+    content: z
+      .string()
+      .optional()
+      .describe("New UTF-8 text content; fully replaces the file."),
+    contentBase64: z
+      .string()
+      .min(1)
+      .optional()
+      .describe("New base64 binary content; fully replaces the file."),
+    mimeType: z
+      .string()
+      .min(1)
+      .optional()
+      .describe("Optional new MIME type. Sniffed from the bytes when omitted."),
+  })
+  .refine((v) => (v.id != null) !== (v.filename != null), {
+    message: "provide exactly one of `id` or `filename`",
+  })
+  .refine((v) => (v.content != null) !== (v.contentBase64 != null), {
+    message: "provide exactly one of `content` or `contentBase64`",
+  })
+  .describe(
+    "Replace the contents of an existing persistent file (My Files) in place, " +
+      "keeping its id and name. In a project chat only the project's files can " +
+      "be edited.",
+  );
+
+const EditFileOutputSchema = z.object({
+  fileId: z.string(),
+  filename: z.string(),
+  mimeType: z.string(),
+  sizeBytes: z.number(),
+  /** See DownloadFileOutputSchema.downloadUrl. */
+  downloadUrl: z.string(),
+});
+
+const DeleteFileSchema = z
+  .strictObject({
+    id: z
+      .string()
+      .min(1)
+      .optional()
+      .describe("Id of the file to delete (from search_files / save_result)."),
+    filename: z
+      .string()
+      .min(1)
+      .optional()
+      .describe(
+        "Filename to delete instead of `id`; rejected as ambiguous if more than one file shares the name.",
+      ),
+  })
+  .refine((v) => (v.id != null) !== (v.filename != null), {
+    message: "provide exactly one of `id` or `filename`",
+  })
+  .describe(
+    "Permanently delete a persistent file (My Files). In a project chat only " +
+      "the project's files can be deleted.",
+  );
+
+const DeleteFileOutputSchema = z.object({
+  fileId: z.string(),
+  filename: z.string(),
+  deleted: z.literal(true),
+});
+
 const registry = defineArchestraTools([
   defineArchestraTool({
     shortName: TOOL_RUN_COMMAND_SHORT_NAME,
@@ -629,20 +712,18 @@ const registry = defineArchestraTools([
         throw error;
       }
 
-      const rows = scope
-        ? await FileModel.listByProject({
-            organizationId: guard.userCtx.organizationId,
-            projectId: scope.projectId,
-          })
-        : await FileModel.listForUser({
-            organizationId: guard.userCtx.organizationId,
-            userId: guard.userCtx.userId,
-          });
-
-      const query = args.query?.toLowerCase() ?? null;
-      const matches = rows.filter(
-        (f) => !query || f.filename.toLowerCase().includes(query),
-      );
+      const matches = await fileStore.search({
+        organizationId: guard.userCtx.organizationId,
+        userId: guard.userCtx.userId,
+        scope: scope
+          ? {
+              kind: "project",
+              projectId: scope.projectId,
+              projectName: scope.projectName,
+            }
+          : { kind: "personal" },
+        query: args.query,
+      });
 
       const result = {
         files: matches.map((f) => ({
@@ -730,7 +811,7 @@ const registry = defineArchestraTools([
         claimed: args.mimeType,
       });
       try {
-        const row = await FileModel.create({
+        const row = await fileStore.put({
           organizationId: guard.userCtx.organizationId,
           userId: guard.userCtx.userId,
           projectId: scope?.projectId ?? null,
@@ -766,11 +847,191 @@ const registry = defineArchestraTools([
           ].join("\n"),
         );
       } catch (error) {
+        if (error instanceof FileNameExistsError) {
+          return errorResult(
+            `A file named "${filename}" already exists${scope ? ` in ${scope.projectName}` : ""}. Choose a different name or delete the existing file first.`,
+          );
+        }
+        if (error instanceof UnsafePathError) {
+          return errorResult(`"${filename}" is not a usable file name.`);
+        }
         if (error instanceof SkillSandboxError) {
           return errorResult(error.message);
         }
         throw error;
       }
+    },
+  }),
+  defineArchestraTool({
+    shortName: TOOL_EDIT_FILE_SHORT_NAME,
+    title: "Edit File",
+    description:
+      "Replace the contents of an existing persistent file (My Files) in " +
+      "place, keeping its id and filename — use it to revise a file you saved " +
+      "earlier (e.g. trim a list down to the one item you want to keep). " +
+      "Identify the file by `id` (from search_files / save_result) or by " +
+      "`filename`. In a project chat only the project's files can be edited. " +
+      "Requires `sandbox:execute`.",
+    schema: EditFileSchema,
+    outputSchema: EditFileOutputSchema,
+    async handler({ args, context }) {
+      const guard = ensureUsable(context);
+      if ("error" in guard) return errorResult(guard.error);
+
+      let data: Buffer;
+      if (args.contentBase64 != null) {
+        if (!BASE64_RE.test(args.contentBase64)) {
+          return errorResult("contentBase64 is not valid base64.");
+        }
+        data = Buffer.from(args.contentBase64, "base64");
+      } else {
+        data = Buffer.from(args.content ?? "", "utf8");
+      }
+      if (data.byteLength === 0) {
+        return errorResult("the file content is empty.");
+      }
+      const limit = config.skillsSandbox.artifactBytesLimit;
+      if (data.byteLength > limit) {
+        return errorResult(
+          `the file is too large (${data.byteLength} bytes > ${limit} byte limit).`,
+        );
+      }
+
+      let scope: ProjectFileScope | null;
+      try {
+        scope = await resolveProjectFileScope({
+          conversationId: context.conversationId,
+          userId: guard.userCtx.userId,
+          organizationId: guard.userCtx.organizationId,
+        });
+      } catch (error) {
+        if (error instanceof SkillSandboxError)
+          return errorResult(error.message);
+        throw error;
+      }
+
+      const ref = args.id ?? args.filename ?? "";
+      const resolved = await fileStore.resolveMyFileRef({
+        organizationId: guard.userCtx.organizationId,
+        userId: guard.userCtx.userId,
+        id: args.id,
+        filename: args.filename,
+        scope: scope ? { projectId: scope.projectId } : null,
+      });
+      if ("error" in resolved) {
+        return errorResult(describeMyFileError(resolved.error, ref));
+      }
+
+      const mimeType = resolveArtifactMime({
+        buffer: data,
+        claimed: args.mimeType,
+      });
+      const updated = await fileStore.update({
+        file: resolved,
+        mimeType,
+        sizeBytes: data.byteLength,
+        data,
+      });
+      if (!updated) {
+        return errorResult(describeMyFileError("not_found", ref));
+      }
+
+      logger.info(
+        {
+          fileId: updated.id,
+          sizeBytes: updated.sizeBytes,
+          projectScoped: !!scope,
+        },
+        "[Sandbox] file edited in PFS",
+      );
+
+      if (context.conversationId) {
+        const { conversationId } = context;
+        void ConversationFileTouchModel.recordTouch({
+          organizationId: guard.userCtx.organizationId,
+          conversationId,
+          fileId: updated.id,
+          touchKind: "edit",
+        }).catch((error) => {
+          logger.warn(
+            { error, conversationId, fileId: updated.id },
+            "[Sandbox] failed to record file touch",
+          );
+        });
+      }
+
+      const downloadUrl = `/api/skill-sandbox/artifacts/${updated.id}`;
+      return structuredSuccessResult(
+        {
+          fileId: updated.id,
+          filename: updated.filename,
+          mimeType: updated.mimeType,
+          sizeBytes: updated.sizeBytes,
+          downloadUrl,
+        },
+        [
+          `Updated ${updated.filename} (${updated.sizeBytes} bytes).`,
+          `Download URL (use this for links): ${downloadUrl}`,
+        ].join("\n"),
+      );
+    },
+  }),
+  defineArchestraTool({
+    shortName: TOOL_DELETE_FILE_SHORT_NAME,
+    title: "Delete File",
+    description:
+      "Permanently delete a persistent file (My Files), identified by `id` " +
+      "(from search_files / save_result) or by `filename`. In a project chat " +
+      "only the project's files can be deleted. Requires `sandbox:execute`.",
+    schema: DeleteFileSchema,
+    outputSchema: DeleteFileOutputSchema,
+    async handler({ args, context }) {
+      const guard = ensureUsable(context);
+      if ("error" in guard) return errorResult(guard.error);
+
+      let scope: ProjectFileScope | null;
+      try {
+        scope = await resolveProjectFileScope({
+          conversationId: context.conversationId,
+          userId: guard.userCtx.userId,
+          organizationId: guard.userCtx.organizationId,
+        });
+      } catch (error) {
+        if (error instanceof SkillSandboxError)
+          return errorResult(error.message);
+        throw error;
+      }
+
+      const ref = args.id ?? args.filename ?? "";
+      const resolved = await fileStore.resolveMyFileRef({
+        organizationId: guard.userCtx.organizationId,
+        userId: guard.userCtx.userId,
+        id: args.id,
+        filename: args.filename,
+        scope: scope ? { projectId: scope.projectId } : null,
+      });
+      if ("error" in resolved) {
+        return errorResult(describeMyFileError(resolved.error, ref));
+      }
+
+      const deleted = await fileStore.delete({
+        ref: resolved.id,
+        organizationId: guard.userCtx.organizationId,
+        userId: guard.userCtx.userId,
+      });
+      if (!deleted) {
+        return errorResult(describeMyFileError("not_found", ref));
+      }
+
+      logger.info(
+        { fileId: resolved.id, projectScoped: !!scope },
+        "[Sandbox] file deleted from PFS",
+      );
+
+      return structuredSuccessResult(
+        { fileId: resolved.id, filename: resolved.filename, deleted: true },
+        `Deleted ${resolved.filename}.`,
+      );
     },
   }),
 ] as const);
@@ -1056,6 +1317,23 @@ interface LoadedUpload {
   sourceFileId?: string;
 }
 
+/** Map a my_file resolution failure to a model-facing message. */
+function describeMyFileError(
+  error: MyFileResolutionError["error"],
+  ref: string,
+): string {
+  switch (error) {
+    case "ambiguous":
+      return `Multiple persistent files are named "${ref}". Run search_files and use the \`id\` of the one you mean.`;
+    case "outside_project":
+      return "This chat belongs to a project; only the project's files can be used here. Run search_files to see them.";
+    case "missing_bytes":
+      return `The persistent file ${ref} exists but its bytes are no longer in storage.`;
+    default:
+      return `No persistent file ${ref} exists. Run search_files to see what is available.`;
+  }
+}
+
 /**
  * Resolve upload source bytes. chat_attachment reads server-side and is scoped
  * to the caller's org AND the current conversation — the bytes never enter the
@@ -1145,7 +1423,7 @@ async function loadUploadSource(params: {
       };
     }
     case "my_file": {
-      const resolved = await skillSandboxArtifactService.resolveMyFileSource({
+      const resolved = await fileStore.resolveMyFileSource({
         organizationId: userCtx.organizationId,
         userId: userCtx.userId,
         id: source.id,
@@ -1164,31 +1442,15 @@ async function loadUploadSource(params: {
           },
           "[Sandbox] rejected my_file upload",
         );
-        switch (resolved.error) {
-          case "ambiguous":
-            return {
-              error: `Multiple persistent files are named "${source.filename}". Run search_files and use the \`id\` of the one you mean.`,
-            };
-          case "outside_project":
-            return {
-              error:
-                "This chat belongs to a project; only the project's files can be used here. Run search_files to see them.",
-            };
-          case "missing_bytes":
-            return {
-              error: `The persistent file ${ref} exists but its bytes are no longer in storage.`,
-            };
-          default:
-            return {
-              error: `No persistent file ${ref} exists. Run search_files to see what is available.`,
-            };
-        }
+        return { error: describeMyFileError(resolved.error, ref) };
       }
       return {
         data: resolved.data,
         mimeType: resolved.mimeType,
         originalName: resolved.originalName,
-        sourceFileId: resolved.fileId,
+        // null (an untracked, hand-placed object with no row) → undefined: there
+        // is no files row to record a conversation touch against.
+        sourceFileId: resolved.fileId ?? undefined,
       };
     }
   }
