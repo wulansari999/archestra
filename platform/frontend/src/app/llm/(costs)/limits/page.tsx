@@ -3,6 +3,7 @@
 import type { archestraApiTypes } from "@archestra/shared";
 import type { ColumnDef } from "@tanstack/react-table";
 import {
+  Boxes,
   Building2,
   Edit,
   Info,
@@ -59,6 +60,7 @@ import {
 import { UserSearchableSelect } from "@/components/user-searchable-select";
 import { VirtualKeySearchableSelect } from "@/components/virtual-key-searchable-select";
 import { useProfiles } from "@/lib/agent.query";
+import { useEnvironments } from "@/lib/environment.query";
 import { useDataTableQueryParams } from "@/lib/hooks/use-data-table-query-params";
 import {
   useCreateLimit,
@@ -144,6 +146,11 @@ const ENTITY_TYPE_ITEMS: Array<{
     label: "Virtual Key",
     icon: <Key className="h-4 w-4 shrink-0 text-muted-foreground" />,
   },
+  {
+    value: "environment",
+    label: "Environment",
+    icon: <Boxes className="h-4 w-4 shrink-0 text-muted-foreground" />,
+  },
 ];
 
 function formatCurrencyWhole(value: number) {
@@ -175,6 +182,8 @@ export default function LimitsPage() {
   const { data: llmProxies = [] } = useProfiles({
     filters: { agentTypes: ["llm_proxy"] },
   });
+  const { data: environmentsData } = useEnvironments();
+  const environments = environmentsData?.environments ?? [];
   const { data: modelsWithApiKeys = [] } = useModelsWithApiKeys();
   const createLimit = useCreateLimit();
   const updateLimit = useUpdateLimit();
@@ -291,9 +300,15 @@ export default function LimitsPage() {
         );
         return proxy?.name ?? "Unknown LLM proxy";
       }
+      if (limit.entityType === "environment") {
+        const environment = environments.find(
+          (candidate) => candidate.id === limit.entityId,
+        );
+        return environment?.name ?? "Unknown environment";
+      }
       return "Unknown";
     },
-    [teams, members, virtualKeys, agents, llmProxies],
+    [teams, members, virtualKeys, agents, llmProxies, environments],
   );
 
   const getEntityIcon = useCallback(
@@ -310,6 +325,9 @@ export default function LimitsPage() {
       }
       if (limit.entityType === "virtual_key") {
         return <Key className={iconClassName} />;
+      }
+      if (limit.entityType === "environment") {
+        return <Boxes className={iconClassName} />;
       }
       if (
         limit.entityType === "agent" &&
@@ -669,6 +687,7 @@ export default function LimitsPage() {
             <SelectItem value="llm_proxy">LLM Proxy</SelectItem>
             <SelectItem value="user">User</SelectItem>
             <SelectItem value="virtual_key">Virtual Key</SelectItem>
+            <SelectItem value="environment">Environment</SelectItem>
           </SelectContent>
         </Select>
 
@@ -845,6 +864,25 @@ export default function LimitsPage() {
                       value: proxy.id,
                       label: proxy.name,
                       description: proxy.description ?? undefined,
+                    }))}
+                    className="w-full sm:flex-1"
+                  />
+                )}
+
+                {formState.entityType === "environment" && (
+                  <SearchableSelect
+                    value={formState.entityId}
+                    onValueChange={(value) =>
+                      setFormState((current) => ({
+                        ...current,
+                        entityId: value,
+                      }))
+                    }
+                    placeholder="Select environment"
+                    items={environments.map((environment) => ({
+                      value: environment.id,
+                      label: environment.name,
+                      description: environment.description ?? undefined,
                     }))}
                     className="w-full sm:flex-1"
                   />

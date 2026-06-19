@@ -626,7 +626,7 @@ This tool takes no arguments.
 
 | Tool | Description | Required RBAC Permission |
 |------|-------------|--------------------------|
-| `create_limit` | Create a new cost or usage limit for an organization, team, agent, user, virtual key, or MCP gateway. | `llmLimit:create` |
+| `create_limit` | Create a new cost or usage limit for an organization, team, agent, user, virtual key, environment, or MCP gateway. | `llmLimit:create` |
 | `get_limits` | Retrieve all limits, optionally filtered by entity type and/or entity ID. | `llmLimit:read` |
 | `update_limit` | Update mutable fields on an existing limit. | `llmLimit:update` |
 | `delete_limit` | Delete an existing limit by ID. | `llmLimit:delete` |
@@ -641,8 +641,8 @@ Required RBAC permission: `llmLimit:create`
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `entity_type` | `"organization" \| "team" \| "agent" \| "user" \| "virtual_key"` | Yes | The type of entity to apply the limit to. |
-| `entity_id` | `string` | Yes | The ID of the entity (organization, team, agent, user, or virtual_key). |
+| `entity_type` | `"organization" \| "team" \| "agent" \| "user" \| "virtual_key" \| "environment"` | Yes | The type of entity to apply the limit to. |
+| `entity_id` | `string` | Yes | The ID of the entity (organization, team, agent, user, virtual_key, or environment). |
 | `limit_type` | `"token_cost" \| "mcp_server_calls" \| "tool_calls"` | Yes | The type of limit to apply. |
 | `limit_value` | `number` | Yes | The limit value (tokens or count depending on limit type). |
 | `model` | `string[] \| null` | No | Array of model names. Omit for all models. |
@@ -656,7 +656,7 @@ Required RBAC permission: `llmLimit:create`
 |-------|------|----------|-------------|
 | `limit` | `object` | Yes |  |
 | `limit.id` | `string` | Yes | The limit ID. |
-| `limit.entityType` | `"organization" \| "team" \| "agent" \| "user" \| "virtual_key"` | Yes | The limited entity type. |
+| `limit.entityType` | `"organization" \| "team" \| "agent" \| "user" \| "virtual_key" \| "environment"` | Yes | The limited entity type. |
 | `limit.entityId` | `string` | Yes | The limited entity ID. |
 | `limit.limitType` | `"token_cost" \| "mcp_server_calls" \| "tool_calls"` | Yes | The kind of limit. |
 | `limit.limitValue` | `number` | Yes | The configured limit value. |
@@ -673,7 +673,7 @@ Required RBAC permission: `llmLimit:read`
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `entity_type` | `"organization" \| "team" \| "agent" \| "user" \| "virtual_key"` | No | Optional filter by entity type. |
+| `entity_type` | `"organization" \| "team" \| "agent" \| "user" \| "virtual_key" \| "environment"` | No | Optional filter by entity type. |
 | `entity_id` | `string` | No | Optional filter by entity ID. |
 
 ##### Output
@@ -682,7 +682,7 @@ Required RBAC permission: `llmLimit:read`
 |-------|------|----------|-------------|
 | `limits` | `object[]` | Yes |  |
 | `limits[].id` | `string` | Yes | The limit ID. |
-| `limits[].entityType` | `"organization" \| "team" \| "agent" \| "user" \| "virtual_key"` | Yes | The limited entity type. |
+| `limits[].entityType` | `"organization" \| "team" \| "agent" \| "user" \| "virtual_key" \| "environment"` | Yes | The limited entity type. |
 | `limits[].entityId` | `string` | Yes | The limited entity ID. |
 | `limits[].limitType` | `"token_cost" \| "mcp_server_calls" \| "tool_calls"` | Yes | The kind of limit. |
 | `limits[].limitValue` | `number` | Yes | The configured limit value. |
@@ -709,7 +709,7 @@ Required RBAC permission: `llmLimit:update`
 |-------|------|----------|-------------|
 | `limit` | `object` | Yes |  |
 | `limit.id` | `string` | Yes | The limit ID. |
-| `limit.entityType` | `"organization" \| "team" \| "agent" \| "user" \| "virtual_key"` | Yes | The limited entity type. |
+| `limit.entityType` | `"organization" \| "team" \| "agent" \| "user" \| "virtual_key" \| "environment"` | Yes | The limited entity type. |
 | `limit.entityId` | `string` | Yes | The limited entity ID. |
 | `limit.limitType` | `"token_cost" \| "mcp_server_calls" \| "tool_calls"` | Yes | The kind of limit. |
 | `limit.limitValue` | `number` | Yes | The configured limit value. |

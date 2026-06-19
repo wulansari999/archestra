@@ -374,6 +374,12 @@ export const RouteId = {
   UpdateLimit: "updateLimit",
   DeleteLimit: "deleteLimit",
 
+  // Per-environment default user limits
+  ListDefaultUserLimits: "listDefaultUserLimits",
+  CreateDefaultUserLimit: "createDefaultUserLimit",
+  UpdateDefaultUserLimit: "updateDefaultUserLimit",
+  DeleteDefaultUserLimit: "deleteDefaultUserLimit",
+
   // Organization Routes
   GetOrganization: "getOrganization",
   GetOnboardingStatus: "getOnboardingStatus",

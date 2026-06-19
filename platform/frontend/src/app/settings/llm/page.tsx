@@ -4,6 +4,7 @@ import { archestraApiSdk, type archestraApiTypes } from "@archestra/shared";
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import { EnvironmentUserLimitsSection } from "@/app/settings/llm/_parts/environment-user-limits-section";
 import { ExternalDocsLink } from "@/components/external-docs-link";
 import {
   DEFAULT_LIMIT_CLEANUP_INTERVAL,
@@ -447,6 +448,12 @@ export default function LlmSettingsPage() {
           )}
         </WithPermissions>
       </SettingsBlock>
+      <WithPermissions
+        permissions={{ llmLimit: ["read"] }}
+        noPermissionHandle="hide"
+      >
+        <EnvironmentUserLimitsSection />
+      </WithPermissions>
       <SettingsSaveBar
         hasChanges={hasChanges}
         isSaving={updateLlmSettingsMutation.isPending}
