@@ -1,11 +1,9 @@
 [[stages]]
-text = """Attached is orders.xlsx (worksheet "Orders", columns: order_id, region, amount_cents, note). It's a
-binary file in your sandbox at /home/sandbox/attachments/orders.xlsx -- read it there (e.g. with openpyxl
-or pandas in run_command), not from this message.
+text = """Attached is orders.xlsx (worksheet "Orders", columns: order_id, region, amount_cents, note).
 
-Tell me which region has the highest total amount_cents (if two regions tie, pick the one that sorts
-first alphabetically), and the overall total amount_cents across every order. Compute these yourself
-from the data.
+Working from the data itself, tell me which region has the highest total amount_cents (if two regions
+tie, pick the one that sorts first alphabetically), and the overall total amount_cents across every
+order.
 
 Call submit_result with result = {"top_region": "<region>", "total_cents": <integer total across all orders>}."""
 
