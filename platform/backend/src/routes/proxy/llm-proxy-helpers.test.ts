@@ -89,7 +89,10 @@ vi.mock("@/observability", async (importOriginal) => {
 });
 
 // Import after mocks
+import { EventEmitter } from "node:events";
+import type { FastifyReply } from "fastify";
 import {
+  abortUpstreamOnClientDisconnect,
   buildInteractionRecord,
   calculateInteractionCosts,
   normalizeToolCallsForPolicy,
@@ -510,5 +513,53 @@ describe("withSessionContext", () => {
     expect(withSpy).not.toHaveBeenCalled();
 
     withSpy.mockRestore();
+  });
+});
+
+// --------------------------------------------------------------------------
+// abortUpstreamOnClientDisconnect
+// --------------------------------------------------------------------------
+
+describe("abortUpstreamOnClientDisconnect", () => {
+  // A fake reply whose `.raw` is an EventEmitter so we can drive the "close"
+  // event and toggle the completion flags the guard reads.
+  function makeReply(): FastifyReply {
+    const raw = new EventEmitter();
+    return { raw } as unknown as FastifyReply;
+  }
+
+  test("aborts when the client closes before the response is done", () => {
+    const reply = makeReply();
+    const [signal] = abortUpstreamOnClientDisconnect(reply, () => false);
+
+    expect(signal.aborted).toBe(false);
+    reply.raw.emit("close");
+    expect(signal.aborted).toBe(true);
+  });
+
+  test("does NOT abort when close fires after the response completed", () => {
+    const reply = makeReply();
+    // Node emits "close" on every response, including successful ones — the
+    // guard must prevent a spurious abort in that case.
+    const [signal] = abortUpstreamOnClientDisconnect(reply, () => true);
+
+    reply.raw.emit("close");
+    expect(signal.aborted).toBe(false);
+  });
+
+  test("unsubscribe removes the close listener (no leak)", () => {
+    const reply = makeReply();
+    const [signal, unsubscribe] = abortUpstreamOnClientDisconnect(
+      reply,
+      () => false,
+    );
+
+    expect(reply.raw.listenerCount("close")).toBe(1);
+    unsubscribe();
+    expect(reply.raw.listenerCount("close")).toBe(0);
+
+    // A close after unsubscribe must not abort.
+    reply.raw.emit("close");
+    expect(signal.aborted).toBe(false);
   });
 });
