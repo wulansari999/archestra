@@ -813,6 +813,7 @@ describe("search_tools", () => {
           enum: ["open", "closed"],
           description: "Issue state.",
           properties: null,
+          hasHiddenDetail: false,
         },
         {
           name: "payload",
@@ -824,6 +825,7 @@ describe("search_tools", () => {
             { name: "id", type: "number", required: true },
             { name: "note", type: "string", required: false },
           ],
+          hasHiddenDetail: false,
         },
       ]);
     });
@@ -988,6 +990,114 @@ describe("search_tools", () => {
     test("returns an empty string when there are no parameters", () => {
       expect(__test.formatParamsSignature([])).toBe("");
       expect(signatureFor({ type: "object", properties: {} })).toBe("");
+    });
+
+    describe("hidden-detail marker", () => {
+      const hasHidden = (schema: Record<string, unknown>) =>
+        __test.summarizeInputParameters(schema)[0]?.hasHiddenDetail;
+
+      test("marks an explicit additionalProperties object (freeform)", () => {
+        const schema = {
+          type: "object",
+          properties: {
+            result: { type: "object", additionalProperties: true },
+          },
+          required: ["result"],
+        };
+        expect(hasHidden(schema)).toBe(true);
+        expect(signatureFor(schema)).toBe("result!:object…");
+      });
+
+      test("marks an opaque object with no listed properties", () => {
+        const schema = {
+          type: "object",
+          properties: { meta: { type: "object" } },
+        };
+        expect(hasHidden(schema)).toBe(true);
+        expect(signatureFor(schema)).toBe("meta?:object…");
+      });
+
+      test("marks an object nested deeper than the one level shown", () => {
+        const schema = {
+          type: "object",
+          properties: {
+            config: {
+              type: "object",
+              properties: {
+                user: { type: "object", properties: { name: {} } },
+              },
+            },
+          },
+        };
+        expect(hasHidden(schema)).toBe(true);
+        expect(signatureFor(schema)).toBe("config?:object{user?:object}…");
+      });
+
+      test("marks an array of freeform objects", () => {
+        const schema = {
+          type: "object",
+          properties: {
+            rows: {
+              type: "array",
+              items: { type: "object", additionalProperties: true },
+            },
+          },
+        };
+        expect(hasHidden(schema)).toBe(true);
+        expect(signatureFor(schema)).toBe("rows?:array…");
+      });
+
+      test("does not mark an array of fully-shown objects", () => {
+        const schema = {
+          type: "object",
+          properties: {
+            todos: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: { content: { type: "string" } },
+                required: ["content"],
+              },
+            },
+          },
+        };
+        expect(hasHidden(schema)).toBe(false);
+        expect(signatureFor(schema)).toBe("todos?:array{content!:string}");
+      });
+
+      test("does not mark scalars", () => {
+        expect(
+          hasHidden({ type: "object", properties: { q: { type: "string" } } }),
+        ).toBe(false);
+      });
+
+      test("does not mark a fully-shown object that merely omits additionalProperties", () => {
+        const schema = {
+          type: "object",
+          properties: {
+            payload: {
+              type: "object",
+              properties: { id: { type: "number" } },
+            },
+          },
+        };
+        expect(hasHidden(schema)).toBe(false);
+        expect(signatureFor(schema)).toBe("payload?:object{id?:number}");
+      });
+
+      test("does not mark a closed object with explicit additionalProperties:false", () => {
+        const schema = {
+          type: "object",
+          properties: {
+            payload: {
+              type: "object",
+              properties: { id: { type: "number" } },
+              additionalProperties: false,
+            },
+          },
+        };
+        expect(hasHidden(schema)).toBe(false);
+      });
     });
   });
 
