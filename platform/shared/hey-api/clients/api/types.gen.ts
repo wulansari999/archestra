@@ -25868,7 +25868,7 @@ export type ListDefaultUserLimitsResponses = {
     200: Array<{
         id: string;
         organizationId: string;
-        environmentId: string;
+        environmentId: string | null;
         limitValue: number;
         model?: Array<string> | null;
         cleanupInterval: '1h' | '12h' | '24h' | '1w' | '1m' | 'calendar_day' | 'calendar_week_sunday' | 'calendar_week_monday' | 'calendar_month';
@@ -25881,7 +25881,7 @@ export type ListDefaultUserLimitsResponse = ListDefaultUserLimitsResponses[keyof
 
 export type CreateDefaultUserLimitData = {
     body: {
-        environmentId: string;
+        environmentId?: string | null;
         limitValue: number;
         model?: Array<string> | null;
         cleanupInterval?: '1h' | '12h' | '24h' | '1w' | '1m' | 'calendar_day' | 'calendar_week_sunday' | 'calendar_week_monday' | 'calendar_month';
@@ -25963,7 +25963,7 @@ export type CreateDefaultUserLimitResponses = {
     200: {
         id: string;
         organizationId: string;
-        environmentId: string;
+        environmentId: string | null;
         limitValue: number;
         model?: Array<string> | null;
         cleanupInterval: '1h' | '12h' | '24h' | '1w' | '1m' | 'calendar_day' | 'calendar_week_sunday' | 'calendar_week_monday' | 'calendar_month';
@@ -26144,7 +26144,7 @@ export type UpdateDefaultUserLimitResponses = {
     200: {
         id: string;
         organizationId: string;
-        environmentId: string;
+        environmentId: string | null;
         limitValue: number;
         model?: Array<string> | null;
         cleanupInterval: '1h' | '12h' | '24h' | '1w' | '1m' | 'calendar_day' | 'calendar_week_sunday' | 'calendar_week_monday' | 'calendar_month';
@@ -51351,9 +51351,6 @@ export type UpdateLlmSettingsData = {
     body: {
         convertToolResultsToToon?: boolean;
         compressionScope?: 'organization' | 'team';
-        defaultUserLimitValue?: number | null;
-        defaultUserLimitModel?: Array<string> | null;
-        defaultUserLimitCleanupInterval?: '1h' | '12h' | '24h' | '1w' | '1m' | 'calendar_day' | 'calendar_week_sunday' | 'calendar_week_monday' | 'calendar_month';
     };
     path?: never;
     query?: never;

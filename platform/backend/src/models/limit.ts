@@ -1068,40 +1068,31 @@ export class LimitValidationService {
         }
       }
 
-      const [organization] = await db
-        .select({
-          defaultUserLimitValue:
-            schema.organizationsTable.defaultUserLimitValue,
-          defaultUserLimitModel:
-            schema.organizationsTable.defaultUserLimitModel,
-          defaultUserLimitCleanupInterval:
-            schema.organizationsTable.defaultUserLimitCleanupInterval,
-        })
-        .from(schema.organizationsTable)
-        .where(eq(schema.organizationsTable.id, params.organizationId))
-        .limit(1);
-
-      if (!organization?.defaultUserLimitValue) {
+      // The organization-wide default is the NULL-environment row in the
+      // unified default-user-limits store. Its usage spans the user's whole org
+      // (no environment filter).
+      const globalDefault = await EnvironmentDefaultUserLimitModel.findGlobal(
+        params.organizationId,
+      );
+      if (!globalDefault) {
         return null;
       }
 
       const usage = await getDefaultUserLimitUsage({
         organizationId: params.organizationId,
         userId: params.userId,
-        models: normalizeLimitModels(organization.defaultUserLimitModel),
-        cleanupInterval:
-          organization.defaultUserLimitCleanupInterval ??
-          DEFAULT_LIMIT_CLEANUP_INTERVAL,
+        models: normalizeLimitModels(globalDefault.model),
+        cleanupInterval: globalDefault.cleanupInterval,
       });
 
-      if (usage.cost < organization.defaultUserLimitValue) {
+      if (usage.cost < globalDefault.limitValue) {
         return null;
       }
 
       return buildLimitViolationResponse({
         entityType: "user",
         entityId: params.userId,
-        limitValue: organization.defaultUserLimitValue,
+        limitValue: globalDefault.limitValue,
         comparisonValue: usage.cost,
         limitDescription: "cost_dollars",
         totalTokensIn: usage.tokensIn,

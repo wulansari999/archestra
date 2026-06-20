@@ -1,6 +1,6 @@
 "use client";
 
-import type { archestraApiTypes } from "@archestra/shared";
+import { type archestraApiTypes, DocsPage } from "@archestra/shared";
 import type { ColumnDef } from "@tanstack/react-table";
 import {
   Boxes,
@@ -19,6 +19,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSetCostsAction } from "@/app/llm/(costs)/layout";
 import { AgentIcon } from "@/components/agent-icon";
 import { DeleteConfirmDialog } from "@/components/delete-confirm-dialog";
+import { ExternalDocsLink } from "@/components/external-docs-link";
 import { FormDialog } from "@/components/form-dialog";
 import {
   CLEANUP_INTERVAL_LABELS,
@@ -60,6 +61,8 @@ import {
 import { UserSearchableSelect } from "@/components/user-searchable-select";
 import { VirtualKeySearchableSelect } from "@/components/virtual-key-searchable-select";
 import { useProfiles } from "@/lib/agent.query";
+import { useDefaultUserLimits } from "@/lib/default-user-limit.query";
+import { getFrontendDocsUrl } from "@/lib/docs/docs";
 import { useEnvironments } from "@/lib/environment.query";
 import { useDataTableQueryParams } from "@/lib/hooks/use-data-table-query-params";
 import {
@@ -108,21 +111,26 @@ const MAX_VISIBLE_MODEL_BADGES = 3;
 const ENTITY_TYPE_ITEMS: Array<{
   value: LimitFormEntityType;
   label: string;
+  description: string;
   icon: React.ReactNode;
 }> = [
   {
     value: "organization",
     label: "Organization",
+    description: "A shared budget across all LLM spend in your organization.",
     icon: <Building2 className="h-4 w-4 shrink-0 text-muted-foreground" />,
   },
   {
     value: "team",
     label: "Team",
+    description:
+      "Caps the combined spend of every agent and LLM proxy in a team.",
     icon: <Users className="h-4 w-4 shrink-0 text-muted-foreground" />,
   },
   {
     value: "agent",
     label: "Agent",
+    description: "Caps spend for a single agent.",
     icon: (
       <AgentIcon
         icon={null}
@@ -134,21 +142,27 @@ const ENTITY_TYPE_ITEMS: Array<{
   {
     value: "llm_proxy",
     label: "LLM Proxy",
+    description: "Caps spend for a single LLM proxy.",
     icon: <Network className="h-4 w-4 shrink-0 text-muted-foreground" />,
   },
   {
     value: "user",
     label: "User",
+    description: "Caps one user's spend across the whole organization.",
     icon: <User className="h-4 w-4 shrink-0 text-muted-foreground" />,
   },
   {
     value: "virtual_key",
     label: "Virtual Key",
+    description:
+      "Caps spend for requests made with a specific virtual API key.",
     icon: <Key className="h-4 w-4 shrink-0 text-muted-foreground" />,
   },
   {
     value: "environment",
     label: "Environment",
+    description:
+      "Caps the combined spend of all users in a deployment environment (e.g. production).",
     icon: <Boxes className="h-4 w-4 shrink-0 text-muted-foreground" />,
   },
 ];
@@ -172,6 +186,7 @@ export default function LimitsPage() {
   const { data: teams = [] } = useTeams();
   const { data: organization } = useOrganization();
   const { data: members = [] } = useOrganizationMembers();
+  const { data: defaultUserLimits = [] } = useDefaultUserLimits();
   const { data: virtualKeysData } = useAllVirtualApiKeys({
     limit: LIMITS_ENTITY_SELECTOR_PAGE_SIZE,
   });
@@ -583,7 +598,11 @@ export default function LimitsPage() {
     appliedToFilter !== "all" ||
     modelFilter !== "all";
   const shouldShowDefaultUserLimitNotice =
-    formState.entityType === "user" && !!organization?.defaultUserLimitValue;
+    formState.entityType === "user" && defaultUserLimits.length > 0;
+  const limitsDocsUrl = getFrontendDocsUrl(
+    DocsPage.PlatformCostsAndLimits,
+    "usage-limits",
+  );
 
   async function handleSubmit() {
     const entityType =
@@ -631,9 +650,9 @@ export default function LimitsPage() {
 
   return (
     <div className="space-y-4">
-      {organization?.defaultUserLimitValue && (
+      {defaultUserLimits.length > 0 && (
         <WithPermissions
-          permissions={{ llmSettings: ["read"] }}
+          permissions={{ llmLimit: ["read"] }}
           noPermissionHandle="hide"
         >
           <Alert variant="info">
@@ -726,7 +745,7 @@ export default function LimitsPage() {
         onOpenChange={setIsDialogOpen}
         title={editingLimit ? "Edit limit" : "Create limit"}
         description="Configure scoped LLM token-cost limits."
-        size="small"
+        size="medium"
       >
         <DialogForm
           className="flex min-h-0 flex-1 flex-col"
@@ -736,6 +755,29 @@ export default function LimitsPage() {
           }}
         >
           <DialogBody className="space-y-4">
+            <Alert variant="info">
+              <Info className="h-4 w-4" />
+              <AlertDescription className="block">
+                A limit caps token-cost spend for the selected scope over a
+                recurring window. Limits stack: when more than one applies to a
+                request, every matching limit is checked and the request is
+                blocked if any is exceeded.
+                {limitsDocsUrl && (
+                  <>
+                    {" "}
+                    <ExternalDocsLink
+                      href={limitsDocsUrl}
+                      className="text-inherit underline underline-offset-4"
+                      showIcon={false}
+                    >
+                      Learn how limits are evaluated
+                    </ExternalDocsLink>
+                    .
+                  </>
+                )}
+              </AlertDescription>
+            </Alert>
+
             {shouldShowDefaultUserLimitNotice && (
               <Alert variant="info">
                 <AlertDescription>
@@ -761,10 +803,16 @@ export default function LimitsPage() {
                   items={ENTITY_TYPE_ITEMS.map((item) => ({
                     value: item.value,
                     label: item.label,
+                    searchText: `${item.label} ${item.description}`,
                     content: (
-                      <span className="flex items-center gap-2">
-                        {item.icon}
-                        {item.label}
+                      <span className="flex flex-col gap-0.5">
+                        <span className="flex items-center gap-2">
+                          {item.icon}
+                          {item.label}
+                        </span>
+                        <span className="pl-6 text-xs text-muted-foreground">
+                          {item.description}
+                        </span>
                       </span>
                     ),
                     selectedContent: (

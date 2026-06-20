@@ -20,7 +20,6 @@ import {
   EnvironmentDefaultUserLimitModel,
   EnvironmentModel,
   ModelModel,
-  OrganizationModel,
 } from "@/models";
 import AgentModel from "@/models/agent";
 import LimitModel from "@/models/limit";
@@ -254,10 +253,12 @@ describe("LLM proxy limit enforcement (integration)", () => {
       name: "Default User Limit Agent",
     });
 
-    await OrganizationModel.patch(org.id, {
-      defaultUserLimitValue: 1,
-      defaultUserLimitModel: ["gpt-4o"],
-      defaultUserLimitCleanupInterval: "1w",
+    await EnvironmentDefaultUserLimitModel.create({
+      organizationId: org.id,
+      environmentId: null,
+      limitValue: 1,
+      model: ["gpt-4o"],
+      cleanupInterval: "1w",
     });
     const interaction = await makeInteraction(agent.id, {
       model: "gpt-4o",
@@ -309,10 +310,12 @@ describe("LLM proxy limit enforcement (integration)", () => {
       name: "Custom User Limit Override Agent",
     });
 
-    await OrganizationModel.patch(org.id, {
-      defaultUserLimitValue: 1,
-      defaultUserLimitModel: null,
-      defaultUserLimitCleanupInterval: "1w",
+    await EnvironmentDefaultUserLimitModel.create({
+      organizationId: org.id,
+      environmentId: null,
+      limitValue: 1,
+      model: null,
+      cleanupInterval: "1w",
     });
     await LimitModel.create({
       entityType: "user",
@@ -1042,11 +1045,13 @@ describe("LLM proxy limit enforcement (integration)", () => {
       environmentId: environment.id,
     });
 
-    // Org-wide default would block (limit of 1, usage of 2)...
-    await OrganizationModel.patch(org.id, {
-      defaultUserLimitValue: 1,
-      defaultUserLimitModel: ["gpt-4o"],
-      defaultUserLimitCleanupInterval: "1w",
+    // Org-wide default (NULL environment) would block (limit of 1, usage of 2)...
+    await EnvironmentDefaultUserLimitModel.create({
+      organizationId: org.id,
+      environmentId: null,
+      limitValue: 1,
+      model: ["gpt-4o"],
+      cleanupInterval: "1w",
     });
     // ...but a generous per-environment default overrides it for this env.
     await EnvironmentDefaultUserLimitModel.create({

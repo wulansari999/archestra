@@ -1,6 +1,7 @@
 import { archestraApiSdk, type archestraApiTypes } from "@archestra/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { handleApiError } from "@/lib/utils";
 
 const {
   listDefaultUserLimits,
@@ -24,8 +25,12 @@ export function useDefaultUserLimits() {
   return useQuery({
     queryKey: QUERY_KEY,
     queryFn: async () => {
-      const response = await listDefaultUserLimits();
-      return response.data ?? [];
+      const { data, error } = await listDefaultUserLimits();
+      if (error) {
+        handleApiError(error);
+        return [];
+      }
+      return data ?? [];
     },
   });
 }
@@ -34,18 +39,19 @@ export function useCreateDefaultUserLimit() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (
-      data: archestraApiTypes.CreateDefaultUserLimitData["body"],
+      body: archestraApiTypes.CreateDefaultUserLimitData["body"],
     ) => {
-      const response = await createDefaultUserLimit({ body: data });
-      return response.data;
+      const { data, error } = await createDefaultUserLimit({ body });
+      if (error) {
+        handleApiError(error);
+        return null;
+      }
+      return data;
     },
-    onSuccess: async () => {
+    onSuccess: async (result) => {
+      if (!result) return;
       await queryClient.invalidateQueries({ queryKey: QUERY_KEY });
-      toast.success("Environment user limit created");
-    },
-    onError: (error) => {
-      console.error("Create default user limit error:", error);
-      toast.error("Failed to create environment user limit");
+      toast.success("Default user limit created");
     },
   });
 }
@@ -53,20 +59,21 @@ export function useCreateDefaultUserLimit() {
 export function useUpdateDefaultUserLimit() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async ({ id, ...data }: UpdateDefaultUserLimitParams) => {
-      const response = await updateDefaultUserLimit({
+    mutationFn: async ({ id, ...body }: UpdateDefaultUserLimitParams) => {
+      const { data, error } = await updateDefaultUserLimit({
         path: { id },
-        body: data,
+        body,
       });
-      return response.data;
+      if (error) {
+        handleApiError(error);
+        return null;
+      }
+      return data;
     },
-    onSuccess: async () => {
+    onSuccess: async (result) => {
+      if (!result) return;
       await queryClient.invalidateQueries({ queryKey: QUERY_KEY });
-      toast.success("Environment user limit updated");
-    },
-    onError: (error) => {
-      console.error("Update default user limit error:", error);
-      toast.error("Failed to update environment user limit");
+      toast.success("Default user limit updated");
     },
   });
 }
@@ -75,16 +82,17 @@ export function useDeleteDefaultUserLimit() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async ({ id }: DeleteDefaultUserLimitParams) => {
-      const response = await deleteDefaultUserLimit({ path: { id } });
-      return response.data;
+      const { data, error } = await deleteDefaultUserLimit({ path: { id } });
+      if (error) {
+        handleApiError(error);
+        return null;
+      }
+      return data ?? { success: true };
     },
-    onSuccess: async () => {
+    onSuccess: async (result) => {
+      if (!result) return;
       await queryClient.invalidateQueries({ queryKey: QUERY_KEY });
-      toast.success("Environment user limit deleted");
-    },
-    onError: (error) => {
-      console.error("Delete default user limit error:", error);
-      toast.error("Failed to delete environment user limit");
+      toast.success("Default user limit deleted");
     },
   });
 }

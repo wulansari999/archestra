@@ -1,4 +1,4 @@
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, isNull } from "drizzle-orm";
 import db, { schema } from "@/database";
 import type {
   CreateEnvironmentDefaultUserLimit,
@@ -7,9 +7,12 @@ import type {
 } from "@/types";
 
 /**
- * Data access for per-environment default user limits. Org ownership is enforced
- * by callers (routes) via `findByIdInOrganization` / the environment lookup; the
- * unique-per-environment constraint is enforced by the database.
+ * Data access for default user limits. A row with `environmentId = null` is the
+ * organization-wide default; a row with a set `environmentId` is a
+ * per-environment override. Org ownership is enforced by callers (routes) via
+ * `findByIdInOrganization` / the environment lookup; the
+ * one-default-per-environment and one-global-per-org constraints are enforced by
+ * the database (see the schema).
  */
 class EnvironmentDefaultUserLimitModel {
   static async findAllForOrganization(
@@ -37,6 +40,26 @@ class EnvironmentDefaultUserLimitModel {
         eq(
           schema.environmentDefaultUserLimitsTable.environmentId,
           environmentId,
+        ),
+      )
+      .limit(1);
+    return row ?? null;
+  }
+
+  /** The organization-wide default (the NULL-environment row), if any. */
+  static async findGlobal(
+    organizationId: string,
+  ): Promise<EnvironmentDefaultUserLimit | null> {
+    const [row] = await db
+      .select()
+      .from(schema.environmentDefaultUserLimitsTable)
+      .where(
+        and(
+          eq(
+            schema.environmentDefaultUserLimitsTable.organizationId,
+            organizationId,
+          ),
+          isNull(schema.environmentDefaultUserLimitsTable.environmentId),
         ),
       )
       .limit(1);
@@ -81,7 +104,7 @@ class EnvironmentDefaultUserLimitModel {
       .insert(schema.environmentDefaultUserLimitsTable)
       .values({
         organizationId: params.organizationId,
-        environmentId: params.environmentId,
+        environmentId: params.environmentId ?? null,
         limitValue: params.limitValue,
         model: params.model ?? null,
         ...(params.cleanupInterval

@@ -2141,7 +2141,7 @@ export const deepseekChatCompletionsWithAgent = <ThrowOnError extends boolean = 
 export const listDefaultUserLimits = <ThrowOnError extends boolean = false>(options?: Options<ListDefaultUserLimitsData, ThrowOnError>) => (options?.client ?? client).get<ListDefaultUserLimitsResponses, ListDefaultUserLimitsErrors, ThrowOnError>({ url: '/api/default-user-limits', ...options });
 
 /**
- * Create a per-environment default user limit.
+ * Create a default user limit. Omit environmentId for the org-wide default, or set it for a per-environment override.
  *
  * Authentication:
  *
@@ -4694,7 +4694,7 @@ export const updateSecuritySettings = <ThrowOnError extends boolean = false>(opt
 });
 
 /**
- * Update LLM settings (TOON compression, compression scope, default user limit)
+ * Update LLM settings (TOON compression, compression scope)
  *
  * Authentication:
  *

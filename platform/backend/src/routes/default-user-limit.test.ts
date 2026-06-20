@@ -47,6 +47,37 @@ describe("default-user-limit routes", () => {
   });
 
   describe("POST /api/default-user-limits", () => {
+    test("creates the org-wide default when environmentId is omitted", async () => {
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/default-user-limits",
+        payload: { limitValue: 1000, cleanupInterval: "calendar_month" },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({
+        environmentId: null,
+        organizationId,
+        limitValue: 1000,
+      });
+    });
+
+    test("rejects a second org-wide default with 409", async () => {
+      await EnvironmentDefaultUserLimitModel.create({
+        organizationId,
+        environmentId: null,
+        limitValue: 1000,
+      });
+
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/default-user-limits",
+        payload: { limitValue: 500 },
+      });
+
+      expect(response.statusCode).toBe(409);
+    });
+
     test("creates a per-environment default user limit", async () => {
       const environment = await EnvironmentModel.create({
         organizationId,

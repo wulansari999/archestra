@@ -1,5 +1,5 @@
 {
-  "id": "4f3e1326-f192-4144-b76c-cb75f90cb895",
+  "id": "634511d0-2f0b-4101-a256-6c2309f81989",
   "prevId": "fe7e50eb-87cf-4f7a-9902-fe4cd868b803",
   "version": "7",
   "dialect": "postgresql",
@@ -4992,7 +4992,7 @@
           "name": "environment_id",
           "type": "uuid",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
         "limit_value": {
           "name": "limit_value",
@@ -5029,6 +5029,22 @@
         }
       },
       "indexes": {
+        "environment_default_user_limits_org_global_unique": {
+          "name": "environment_default_user_limits_org_global_unique",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"environment_default_user_limits\".\"environment_id\" IS NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
         "environment_default_user_limits_org_idx": {
           "name": "environment_default_user_limits_org_idx",
           "columns": [

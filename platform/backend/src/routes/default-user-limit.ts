@@ -44,7 +44,8 @@ const defaultUserLimitRoutes: FastifyPluginAsyncZod = async (fastify) => {
     {
       schema: {
         operationId: RouteId.CreateDefaultUserLimit,
-        description: "Create a per-environment default user limit.",
+        description:
+          "Create a default user limit. Omit environmentId for the org-wide default, or set it for a per-environment override.",
         tags: ["Limits"],
         body: CreateEnvironmentDefaultUserLimitSchema,
         response: constructResponseSchema(
@@ -53,29 +54,41 @@ const defaultUserLimitRoutes: FastifyPluginAsyncZod = async (fastify) => {
       },
     },
     async ({ body, organizationId }, reply) => {
-      const environment = await EnvironmentModel.findByIdForOrganization(
-        body.environmentId,
-        organizationId,
-      );
-      if (!environment) {
-        throw new ApiError(404, "Environment not found");
-      }
-
-      const existing =
-        await EnvironmentDefaultUserLimitModel.findByEnvironmentId(
+      if (body.environmentId) {
+        const environment = await EnvironmentModel.findByIdForOrganization(
           body.environmentId,
+          organizationId,
         );
-      if (existing) {
-        throw new ApiError(
-          409,
-          "A default user limit already exists for this environment",
-        );
+        if (!environment) {
+          throw new ApiError(404, "Environment not found");
+        }
+
+        const existing =
+          await EnvironmentDefaultUserLimitModel.findByEnvironmentId(
+            body.environmentId,
+          );
+        if (existing) {
+          throw new ApiError(
+            409,
+            "A default user limit already exists for this environment",
+          );
+        }
+      } else {
+        // Org-wide default: at most one per organization.
+        const existingGlobal =
+          await EnvironmentDefaultUserLimitModel.findGlobal(organizationId);
+        if (existingGlobal) {
+          throw new ApiError(
+            409,
+            "An organization-wide default user limit already exists",
+          );
+        }
       }
 
       return reply.send(
         await EnvironmentDefaultUserLimitModel.create({
           organizationId,
-          environmentId: body.environmentId,
+          environmentId: body.environmentId ?? null,
           limitValue: body.limitValue,
           model: body.model ?? null,
           cleanupInterval: body.cleanupInterval,

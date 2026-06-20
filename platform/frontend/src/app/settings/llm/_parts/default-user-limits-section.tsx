@@ -1,6 +1,6 @@
 "use client";
 
-import { Boxes, Edit, Plus, Trash2 } from "lucide-react";
+import { Boxes, Edit, Globe, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { DeleteConfirmDialog } from "@/components/delete-confirm-dialog";
 import { FormDialog } from "@/components/form-dialog";
@@ -41,8 +41,14 @@ import {
 import { useEnvironments } from "@/lib/environment.query";
 import { useModelsWithApiKeys } from "@/lib/llm-models.query";
 
+// Sentinel for the "All environments" (organization-wide, NULL-environment)
+// option in the scope selector, since an empty string is the unselected state.
+const GLOBAL_SCOPE = "__global__";
+const GLOBAL_SCOPE_LABEL = "All environments (default)";
+
 type FormState = {
-  environmentId: string;
+  // GLOBAL_SCOPE for the org-wide default, otherwise an environment id.
+  scope: string;
   limitValue: string;
   models: string[];
   isAllModels: boolean;
@@ -50,7 +56,7 @@ type FormState = {
 };
 
 const EMPTY_FORM_STATE: FormState = {
-  environmentId: "",
+  scope: "",
   limitValue: "",
   models: [],
   isAllModels: true,
@@ -70,7 +76,7 @@ function formatNumericInput(value: string) {
   return Number(value).toLocaleString("en-US");
 }
 
-export function EnvironmentUserLimitsSection() {
+export function DefaultUserLimitsSection() {
   const { data: environmentsData } = useEnvironments();
   const environments = environmentsData?.environments ?? [];
   const { data: limits = [] } = useDefaultUserLimits();
@@ -94,15 +100,32 @@ export function EnvironmentUserLimitsSection() {
     isBest: model.isBest,
   }));
 
-  const environmentName = (id: string) =>
-    environments.find((environment) => environment.id === id)?.name ??
-    "Unknown environment";
+  const hasGlobal = limits.some((limit) => limit.environmentId === null);
 
-  // Environments that don't yet have a limit (creation only — one per env).
+  const scopeLabel = (environmentId: string | null) => {
+    if (environmentId === null) return GLOBAL_SCOPE_LABEL;
+    return (
+      environments.find((environment) => environment.id === environmentId)
+        ?.name ?? "Unknown environment"
+    );
+  };
+
+  // Environments that don't yet have a row (creation only — one per env).
   const availableEnvironments = environments.filter(
     (environment) =>
       !limits.some((limit) => limit.environmentId === environment.id),
   );
+
+  // Scope options for the create dialog: the org-wide default (if not yet set)
+  // plus any environments without a limit.
+  const scopeOptions = [
+    ...(hasGlobal ? [] : [{ value: GLOBAL_SCOPE, label: GLOBAL_SCOPE_LABEL }]),
+    ...availableEnvironments.map((environment) => ({
+      value: environment.id,
+      label: environment.name,
+      description: environment.description ?? undefined,
+    })),
+  ];
 
   const handleAddOpen = () => {
     setEditing(null);
@@ -114,7 +137,7 @@ export function EnvironmentUserLimitsSection() {
     setEditing(limit);
     const models = Array.isArray(limit.model) ? limit.model : [];
     setFormState({
-      environmentId: limit.environmentId,
+      scope: limit.environmentId === null ? GLOBAL_SCOPE : limit.environmentId,
       limitValue: String(limit.limitValue),
       models,
       isAllModels: models.length === 0,
@@ -126,7 +149,7 @@ export function EnvironmentUserLimitsSection() {
   const canSubmit =
     Number(formState.limitValue) > 0 &&
     (formState.isAllModels || formState.models.length > 0) &&
-    formState.environmentId.length > 0;
+    formState.scope.length > 0;
 
   async function handleSubmit() {
     const model = formState.isAllModels ? null : formState.models;
@@ -147,7 +170,7 @@ export function EnvironmentUserLimitsSection() {
     }
 
     const result = await createLimit.mutateAsync({
-      environmentId: formState.environmentId,
+      environmentId: formState.scope === GLOBAL_SCOPE ? null : formState.scope,
       limitValue,
       model,
       cleanupInterval: formState.cleanupInterval,
@@ -163,35 +186,32 @@ export function EnvironmentUserLimitsSection() {
     setToDelete(null);
   }
 
+  const nothingToAdd = hasGlobal && availableEnvironments.length === 0;
+
   return (
     <SettingsBlock
-      title="Per-environment user limits"
-      description="Override the default user limit per environment — for example, a smaller cap in production than in development. A per-environment limit applies to every user's usage within that environment and takes precedence over the org-wide default above. A custom per-user limit still overrides both."
+      title="Default user limits"
+      description="Set a token-cost limit applied to every member. The 'All environments' default applies everywhere; add a per-environment row to override it for that environment (e.g. a smaller cap in production). A custom per-user limit overrides these defaults."
       control={
         <PermissionButton
           permissions={{ llmLimit: ["create"] }}
           onClick={handleAddOpen}
-          disabled={availableEnvironments.length === 0 && !editing}
+          disabled={nothingToAdd && !editing}
         >
           <Plus className="h-4 w-4" />
           Add limit
         </PermissionButton>
       }
     >
-      {environments.length === 0 ? (
+      {limits.length === 0 ? (
         <p className="text-sm text-muted-foreground">
-          No environments configured. Create an environment to set
-          per-environment user limits.
-        </p>
-      ) : limits.length === 0 ? (
-        <p className="text-sm text-muted-foreground">
-          No per-environment user limits configured.
+          No default user limits configured.
         </p>
       ) : (
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Environment</TableHead>
+              <TableHead>Applies to</TableHead>
               <TableHead>Models</TableHead>
               <TableHead>Limit value</TableHead>
               <TableHead>Cleanup interval</TableHead>
@@ -201,12 +221,17 @@ export function EnvironmentUserLimitsSection() {
           <TableBody>
             {limits.map((limit) => {
               const models = Array.isArray(limit.model) ? limit.model : [];
+              const isGlobal = limit.environmentId === null;
               return (
                 <TableRow key={limit.id}>
                   <TableCell className="font-medium">
                     <span className="flex items-center gap-2">
-                      <Boxes className="h-4 w-4 shrink-0 text-muted-foreground" />
-                      {environmentName(limit.environmentId)}
+                      {isGlobal ? (
+                        <Globe className="h-4 w-4 shrink-0 text-muted-foreground" />
+                      ) : (
+                        <Boxes className="h-4 w-4 shrink-0 text-muted-foreground" />
+                      )}
+                      {scopeLabel(limit.environmentId)}
                     </span>
                   </TableCell>
                   <TableCell className="text-muted-foreground">
@@ -258,11 +283,9 @@ export function EnvironmentUserLimitsSection() {
       <FormDialog
         open={isDialogOpen}
         onOpenChange={setIsDialogOpen}
-        title={
-          editing ? "Edit environment user limit" : "Add environment user limit"
-        }
-        description="Set a per-user token-cost cap for usage within an environment."
-        size="small"
+        title={editing ? "Edit default user limit" : "Add default user limit"}
+        description="Set a per-user token-cost cap, optionally scoped to an environment."
+        size="medium"
       >
         <DialogForm
           className="flex min-h-0 flex-1 flex-col"
@@ -273,27 +296,18 @@ export function EnvironmentUserLimitsSection() {
         >
           <DialogBody className="space-y-4">
             <div className="space-y-2">
-              <Label>Environment</Label>
+              <Label>Applies to</Label>
               {editing ? (
-                <Input
-                  value={environmentName(formState.environmentId)}
-                  disabled
-                />
+                <Input value={scopeLabel(editing.environmentId)} disabled />
               ) : (
                 <SearchableSelect
-                  value={formState.environmentId}
+                  value={formState.scope}
                   onValueChange={(value) =>
-                    setFormState((current) => ({
-                      ...current,
-                      environmentId: value,
-                    }))
+                    setFormState((current) => ({ ...current, scope: value }))
                   }
-                  placeholder="Select environment"
-                  items={availableEnvironments.map((environment) => ({
-                    value: environment.id,
-                    label: environment.name,
-                    description: environment.description ?? undefined,
-                  }))}
+                  placeholder="Select scope"
+                  items={scopeOptions}
+                  className="w-full"
                 />
               )}
             </div>
@@ -313,6 +327,7 @@ export function EnvironmentUserLimitsSection() {
                   }));
                 }}
                 models={modelOptions}
+                editable
                 includeAllOption
               />
             </div>
@@ -369,10 +384,12 @@ export function EnvironmentUserLimitsSection() {
       <DeleteConfirmDialog
         open={!!toDelete}
         onOpenChange={(open) => !open && setToDelete(null)}
-        title="Delete environment user limit"
+        title="Delete default user limit"
         description={
           toDelete
-            ? `Remove the per-user limit for ${environmentName(toDelete.environmentId)}? Usage in this environment will fall back to the org-wide default.`
+            ? toDelete.environmentId === null
+              ? "Remove the organization-wide default user limit? Members will have no default cap except where a per-environment limit applies."
+              : `Remove the per-user limit for ${scopeLabel(toDelete.environmentId)}? Usage in this environment will fall back to the organization-wide default.`
             : ""
         }
         isPending={deleteLimit.isPending}

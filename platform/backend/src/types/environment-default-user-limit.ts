@@ -8,7 +8,8 @@ import { schema } from "@/database";
 import { LimitCleanupIntervalSchema } from "./limit";
 
 /**
- * Per-environment default token-cost limit applied to every organization member.
+ * Default token-cost limit applied per organization member. `environmentId` is
+ * null for the organization-wide default, or set for a per-environment override.
  * See `database/schemas/environment-default-user-limits.ts`.
  */
 export const SelectEnvironmentDefaultUserLimitSchema = createSelectSchema(
@@ -20,12 +21,15 @@ export const SelectEnvironmentDefaultUserLimitSchema = createSelectSchema(
 );
 
 /**
- * Request body for creating a per-environment default user limit. organizationId
- * is taken from the authenticated request context, not the body.
+ * Request body for creating a default user limit. organizationId is taken from
+ * the authenticated request context, not the body. Omit (or null) environmentId
+ * to create/replace the organization-wide default; set it for a per-environment
+ * override.
  */
 export const CreateEnvironmentDefaultUserLimitSchema = createInsertSchema(
   schema.environmentDefaultUserLimitsTable,
   {
+    environmentId: z.string().uuid().nullable().optional(),
     limitValue: z.number().int().positive(),
     model: z.array(z.string()).nullable().optional(),
     cleanupInterval: LimitCleanupIntervalSchema.optional(),
