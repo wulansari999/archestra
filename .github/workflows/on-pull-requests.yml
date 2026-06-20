@@ -179,15 +179,12 @@ jobs:
     if: ${{ github.event_name == 'pull_request' }}
     runs-on: blacksmith-2vcpu-ubuntu-2404
     permissions:
-      contents: read # Required to checkout the repository and diff dependency manifests.
+      contents: read # Required for dependency-review-action to read the PR dependency graph via the API.
       pull-requests: write # Required for dependency-review-action PR comments.
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-        with:
-          persist-credentials: false
-          fetch-depth: 0
-
+      # No checkout: dependency-review-action reads the PR diff via the GitHub
+      # API and references no local config file, so the (fetch-depth: 0) checkout
+      # was ~74s of the job's ~89s for nothing.
       - name: Dependency review
         uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
         with:
@@ -317,6 +314,12 @@ jobs:
 
       - name: Type checking, linting, formatting, unit tests
         run: pnpm check:ci
+
+      # Validates the production build (turbo build: next build + backend build +
+      # Rust NAPI) compiles on every push. This replaces the per-push Docker image
+      # build's only unique signal; turbo remote caching makes it seconds on hit.
+      - name: Production build
+        run: pnpm build
 
       - name: Run validation checks (drizzle-kit, codegen, db migrations)
         env:
@@ -460,8 +463,79 @@ jobs:
           path: platform/frontend/test-results/
           retention-days: "7"
 
+  # Decide whether this PR touches image-assembly inputs. App code is already
+  # validated by `pnpm build` (lint job) and by the real image build in the merge
+  # queue (platform-e2e-build), so a code-only PR's load-and-discard image build
+  # is throwaway work. Only rebuild when the Dockerfile, the Rust release inputs,
+  # lockfiles, or the build tooling itself change.
+  detect-docker-changes:
+    name: Detect Docker-Relevant Changes
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    permissions:
+      contents: read # Required to checkout and diff the PR against its base.
+    outputs:
+      docker-relevant: ${{ steps.detect.outputs.docker-relevant }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Detect docker-relevant changes
+        id: detect
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set +e
+          # Fail open: if the diff can't be computed, build the image to be safe.
+          if ! git fetch --depth=1 origin "$BASE_SHA"; then
+            echo "git fetch failed; treating PR as docker-relevant."
+            echo "docker-relevant=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          CHANGED=$(git diff --name-only "$BASE_SHA" HEAD)
+          if [ $? -ne 0 ]; then
+            echo "git diff failed; treating PR as docker-relevant."
+            echo "docker-relevant=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "Changed files:"
+          echo "$CHANGED"
+          if echo "$CHANGED" | grep -qE '^(platform/Dockerfile$|platform/mcp_server_docker_image/|platform/archestra-rs/|platform/pnpm-lock\.yaml$|platform/pnpm-workspace\.yaml$|\.github/workflows/on-pull-requests\.yml$|\.github/actions/build-docker-image/|\.github/actions/blacksmith-build-push/|\.github/actions/setup-blacksmith-builder/)'; then
+            echo "docker-relevant=true" >> "$GITHUB_OUTPUT"
+            echo "Image-assembly inputs changed; the full Docker build will run."
+          else
+            echo "docker-relevant=false" >> "$GITHUB_OUTPUT"
+            echo "No image-assembly inputs changed; the Docker build is skipped (placeholder carries the check)."
+          fi
+
+  # Required-check placeholder. Carries the "Docker Image Builds (...)" check
+  # names when the real build is skipped: code-only PRs, and merge_group runs
+  # (where platform-e2e-build builds the real, gated image). Same pattern as the
+  # placeholders in platform-e2e-tests.yml. always() so a skipped/failed detect
+  # job never leaves the required check unreported.
+  docker-image-builds-placeholder:
+    name: Docker Image Builds (${{ matrix.name }})
+    needs: [detect-docker-changes]
+    if: ${{ always() && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && needs.detect-docker-changes.outputs.docker-relevant != 'true')) }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        name: [Platform, MCP Server Base]
+    steps:
+      - name: Skip Docker image build
+        run: echo "Real Docker image build runs only when build infra changes on a PR; the merge queue builds the gated image in platform-e2e-build."
+
   docker-image-builds:
     name: Docker Image Builds (${{ matrix.name }})
+    needs: [detect-docker-changes]
+    # PRs only, and only when image-assembly inputs changed. The merge queue
+    # builds the real image in platform-e2e-build, so we never build it here on
+    # merge_group (the placeholder above carries the required check there).
+    if: ${{ github.event_name == 'pull_request' && needs.detect-docker-changes.outputs.docker-relevant == 'true' }}
     runs-on: ${{ matrix.runner }}
     permissions:
       contents: read # Required to checkout the repository and read Docker build inputs.
@@ -500,7 +574,9 @@ jobs:
         with:
           context: ${{ matrix.context }}
           dockerfile: ${{ matrix.dockerfile }}
-          load: "true"
+          # No load/push: nothing in this job runs the image. This only validates
+          # that the Dockerfile assembles, so skip the multi-GB export/import.
+          load: "false"
           tags: ${{ format('{0}:{1}', matrix.local-tag-prefix, github.sha) }}
           turbo-team: ${{ secrets.TURBOREPO_REMOTE_CACHING_TEAM }}
           turbo-token: ${{ secrets.TURBOREPO_REMOTE_CACHING_TOKEN }}
@@ -530,7 +606,8 @@ jobs:
           file: ${{ matrix.dockerfile }}
           platforms: linux/amd64
           push: false
-          load: true
+          # No load: nothing in this job runs the image; validating the build is enough.
+          load: false
           tags: ${{ format('{0}:{1}', matrix.local-tag-prefix, github.sha) }}
 
   helm-chart-linting-and-tests:
