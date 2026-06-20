@@ -91,6 +91,10 @@ jobs:
       version: ${{ inputs.version || (github.event_name == 'pull_request' && github.event.pull_request.head.sha) || github.sha }}
       push_image: true
       auth_provider: gar
+      # Staging runs on amd64 nodes only, so the arm64 leg (~9-10 min, the long
+      # pole of this build) produced an image nothing schedules. Release images
+      # (build-dockerhub-image.yml) stay multi-arch for self-hosted arm users.
+      amd64_only: true
       checkout_ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
       previous_image: ${{ needs.resolve-previous-platform-image.outputs.previous_image }}
     secrets:
