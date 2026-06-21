@@ -7,6 +7,7 @@ import {
   parseVaultReference,
 } from "@archestra/shared";
 import { parseDockerArgsToLocalConfig } from "./docker-args-parser";
+import { type ParsedMcpConfig, parseArgumentsInput, parseConfigInput } from "./json-args-parser";
 import type { McpCatalogFormValues } from "./mcp-catalog-form.types";
 
 type McpCatalogApiData =
@@ -34,22 +35,44 @@ export function transformFormToApiData(
 
   // Handle local configuration
   if (values.serverType === "local" && values.localConfig) {
-    // Parse arguments string into array
-    const argumentsArray = values.localConfig.arguments
-      ? values.localConfig.arguments
-          .split("\n")
-          .map((arg) => arg.trim())
-          .filter((arg) => arg.length > 0)
-      : [];
+    // Parse arguments string — supports JSON array/object AND newline-separated
+    const argsStr = (values.localConfig as Record<string, unknown>).arguments as string | undefined;
+    const parsedArgs = argsStr
+      ? parseArgumentsInput(argsStr)
+      : null;
+
+    // Also try full config parse for side-effects (command, dockerImage, env)
+    const parsedConfig: ParsedMcpConfig | null = argsStr
+      ? parseConfigInput(argsStr)
+      : null;
+
+    // If JSON parsing produced structured config, spread it
+    const argumentsArray =
+      parsedArgs ??
+      (argsStr
+        ? argsStr
+            .split("\n")
+            .map((arg) => arg.trim())
+            .filter((arg) => arg.length > 0)
+        : []);
 
     data.localConfig = {
-      command: values.localConfig.command || undefined,
+      command: parsedConfig?.command ?? values.localConfig.command || undefined,
       arguments: argumentsArray.length > 0 ? argumentsArray : undefined,
-      environment: values.localConfig.environment,
+      environment: parsedConfig?.env
+        ? Object.entries(parsedConfig.env).map(([key, value]) => ({
+            key,
+            type: "plain_text" as const,
+            value,
+            promptOnInstallation: false,
+            required: false,
+            description: "",
+          }))
+        : values.localConfig.environment,
+      dockerImage: parsedConfig?.dockerImage ?? values.localConfig.dockerImage || undefined,
       envFrom:
-        values.localConfig.envFrom?.filter((e) => e.name.trim().length > 0) ||
+        values.localConfig.envFrom?.filter((e: { name: string }) => e.name.trim().length > 0) ||
         undefined,
-      dockerImage: values.localConfig.dockerImage || undefined,
       transportType: values.localConfig.transportType || undefined,
       httpPort: values.localConfig.httpPort
         ? Number(values.localConfig.httpPort)
