@@ -1,5 +1,5 @@
 {
-  "id": "634511d0-2f0b-4101-a256-6c2309f81989",
+  "id": "a0edb717-ff34-408a-b2bd-22b56abb3686",
   "prevId": "fe7e50eb-87cf-4f7a-9902-fe4cd868b803",
   "version": "7",
   "dialect": "postgresql",
@@ -2315,6 +2315,12 @@
           "primaryKey": false,
           "notNull": true
         },
+        "spec": {
+          "name": "spec",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp",
@@ -2427,6 +2433,12 @@
         "template_id": {
           "name": "template_id",
           "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "spec": {
+          "name": "spec",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false
         },
@@ -4971,138 +4983,6 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.environment_default_user_limits": {
-      "name": "environment_default_user_limits",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "organization_id": {
-          "name": "organization_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "environment_id": {
-          "name": "environment_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "limit_value": {
-          "name": "limit_value",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "model": {
-          "name": "model",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "cleanup_interval": {
-          "name": "cleanup_interval",
-          "type": "varchar",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'calendar_month'"
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "environment_default_user_limits_org_global_unique": {
-          "name": "environment_default_user_limits_org_global_unique",
-          "columns": [
-            {
-              "expression": "organization_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "where": "\"environment_default_user_limits\".\"environment_id\" IS NULL",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "environment_default_user_limits_org_idx": {
-          "name": "environment_default_user_limits_org_idx",
-          "columns": [
-            {
-              "expression": "organization_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "environment_default_user_limits_organization_id_organization_id_fk": {
-          "name": "environment_default_user_limits_organization_id_organization_id_fk",
-          "tableFrom": "environment_default_user_limits",
-          "tableTo": "organization",
-          "columnsFrom": [
-            "organization_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "environment_default_user_limits_environment_id_environments_id_fk": {
-          "name": "environment_default_user_limits_environment_id_environments_id_fk",
-          "tableFrom": "environment_default_user_limits",
-          "tableTo": "environments",
-          "columnsFrom": [
-            "environment_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "environment_default_user_limits_environment_unique": {
-          "name": "environment_default_user_limits_environment_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "environment_id"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
     "public.environments": {
       "name": "environments",
       "schema": "",
@@ -5947,12 +5827,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "environment_id": {
-          "name": "environment_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
         "session_id": {
           "name": "session_id",
           "type": "varchar",
@@ -6184,21 +6058,6 @@
           "method": "btree",
           "with": {}
         },
-        "interactions_environment_id_idx": {
-          "name": "interactions_environment_id_idx",
-          "columns": [
-            {
-              "expression": "environment_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
         "interactions_session_id_idx": {
           "name": "interactions_session_id_idx",
           "columns": [
@@ -6305,19 +6164,6 @@
           "tableTo": "virtual_api_keys",
           "columnsFrom": [
             "virtual_key_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        },
-        "interactions_environment_id_environments_id_fk": {
-          "name": "interactions_environment_id_environments_id_fk",
-          "tableFrom": "interactions",
-          "tableTo": "environments",
-          "columnsFrom": [
-            "environment_id"
           ],
           "columnsTo": [
             "id"

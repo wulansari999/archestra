@@ -1,4 +1,4 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useEffect } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -49,6 +49,10 @@ vi.mock("@/lib/config/config.query", () => ({
 
 // ── Import component under test after mocks ───────────────────────────────────
 
+import {
+  clearAllAppDiagnostics,
+  reportAppDiagnostic,
+} from "@/lib/chat/app-diagnostics-store";
 import { McpAppSection } from "./mcp-app-container";
 import { PinnedCanvasProvider, usePinnedCanvas } from "./pinned-canvas-context";
 
@@ -421,6 +425,143 @@ describe("McpAppContainer inline height (via McpAppSection)", () => {
   it("hints no cap to the guest when the canvas fills the sidebar", async () => {
     const bridge = await renderReadyApp(2000, { sidebar: true });
     expect(lastGuestContainerDimensions(bridge)).toEqual({});
+  });
+});
+
+describe("McpAppSection sidebar pinning", () => {
+  const APP_ID = "947051c7-ea8e-48ed-8077-a3cc904d9d61";
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    clearAllAppDiagnostics();
+  });
+
+  // Opens the sidebar canvas host (portalTarget) without selecting any canvas,
+  // so an owned-app section renders its "Show in sidebar" placeholder.
+  function SidebarHost({ target }: { target: HTMLElement }) {
+    const { setPortalTarget } = usePinnedCanvas();
+    useEffect(() => {
+      setPortalTarget(target);
+    }, [setPortalTarget, target]);
+    return null;
+  }
+
+  it("pins an owned-app render into the sidebar canvas host", async () => {
+    const target = document.createElement("div");
+    document.body.appendChild(target);
+
+    await act(async () => {
+      render(
+        <PinnedCanvasProvider
+          conversationId="conv-1"
+          canvases={[{ toolCallId: "tc1", label: "To Do App", createdAt: 0 }]}
+        >
+          <SidebarHost target={target} />
+          <McpAppSection
+            {...defaultProps}
+            appId={APP_ID}
+            toolCallId="tc1"
+            preloadedResource={preloadedResource}
+          />
+        </PinnedCanvasProvider>,
+      );
+    });
+
+    // Opening the canvas host auto-selects the sole canvas, portaling the live
+    // owned-app iframe into the sidebar target (not left inline).
+    expect(target.querySelector("iframe")).toBeInTheDocument();
+    expect(screen.getByText(/showing in sidebar/i)).toBeInTheDocument();
+
+    target.remove();
+  });
+
+  it("keeps the diagnostics badge out of the stretched canvas wrapper when pinned", async () => {
+    // The error badge must not share the fill-container wrapper with the iframe:
+    // that wrapper applies `[&>div]:!h-full`, so a badge inside it gets stretched
+    // to full height and shoves the iframe below the sidebar fold (blank render).
+    reportAppDiagnostic(APP_ID, 1, {
+      type: "csp-violation",
+      message: "script-src blocked eval",
+    });
+    const target = document.createElement("div");
+    document.body.appendChild(target);
+
+    await act(async () => {
+      render(
+        <PinnedCanvasProvider
+          conversationId="conv-1"
+          canvases={[{ toolCallId: "tc1", label: "To Do App", createdAt: 0 }]}
+        >
+          <SidebarHost target={target} />
+          <McpAppSection
+            {...defaultProps}
+            appId={APP_ID}
+            toolCallId="tc1"
+            preloadedResource={preloadedResource}
+          />
+        </PinnedCanvasProvider>,
+      );
+    });
+
+    const iframe = target.querySelector("iframe");
+    expect(iframe).toBeInTheDocument();
+    const badge = within(target).getByText(/runtime error/i);
+
+    // The nearest overflow-hidden wrapper of the iframe is the fill-container
+    // clip box that stretches its `> div` children; the badge must sit OUTSIDE
+    // it, or it gets sized to full height and pushes the iframe off-screen.
+    let clipWrapper: HTMLElement | null = iframe?.parentElement ?? null;
+    while (
+      clipWrapper &&
+      clipWrapper !== target &&
+      !clipWrapper.className.includes("overflow-hidden")
+    ) {
+      clipWrapper = clipWrapper.parentElement;
+    }
+    expect(clipWrapper).not.toBeNull();
+    expect(clipWrapper?.contains(badge)).toBe(false);
+
+    target.remove();
+  });
+
+  it("offers a Show in sidebar control for a second, unselected canvas", async () => {
+    const user = userEvent.setup();
+    const target = document.createElement("div");
+    document.body.appendChild(target);
+
+    await act(async () => {
+      render(
+        <PinnedCanvasProvider
+          conversationId="conv-1"
+          canvases={[
+            { toolCallId: "tc1", label: "First App", createdAt: 0 },
+            { toolCallId: "tc2", label: "Second App", createdAt: 1 },
+          ]}
+        >
+          <SidebarHost target={target} />
+          <McpAppSection
+            {...defaultProps}
+            appId={APP_ID}
+            toolCallId="tc2"
+            preloadedResource={preloadedResource}
+          />
+        </PinnedCanvasProvider>,
+      );
+    });
+
+    // tc1 auto-selected, so tc2 shows the placeholder control; clicking it
+    // selects tc2 and portals its canvas into the sidebar target.
+    const pinButton = screen.getByRole("button", { name: /show in sidebar/i });
+    expect(target.querySelector("iframe")).not.toBeInTheDocument();
+
+    await act(async () => {
+      await user.click(pinButton);
+    });
+
+    expect(target.querySelector("iframe")).toBeInTheDocument();
+    expect(screen.getByText(/showing in sidebar/i)).toBeInTheDocument();
+
+    target.remove();
   });
 });
 
