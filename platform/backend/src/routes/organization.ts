@@ -154,7 +154,8 @@ const organizationRoutes: FastifyPluginAsyncZod = async (fastify) => {
     {
       schema: {
         operationId: RouteId.UpdateLlmSettings,
-        description: "Update LLM settings (TOON compression, compression scope)",
+        description:
+          "Update LLM settings (TOON compression, compression scope)",
         tags: ["Organization"],
         body: UpdateLlmSettingsSchema,
         response: constructResponseSchema(SelectOrganizationSchema),
