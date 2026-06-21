@@ -1,7 +1,7 @@
 "use client";
 
 import { format } from "date-fns";
-import { FileText, Globe, Pin, PinOff, X } from "lucide-react";
+import { AppWindow, FileText, Globe, Pin, PinOff } from "lucide-react";
 import { useEffect, useRef } from "react";
 import { BrowserPanel } from "@/components/chat/browser-panel";
 import { ConversationFilesPanel } from "@/components/chat/conversation-files-panel";
@@ -25,8 +25,6 @@ interface RightSidePanelProps {
   onTabChange: (tab: RightPanelTab) => void;
   onClose: () => void;
   canShowBrowser: boolean;
-  /** Optional action(s) rendered in the tab row, between the tabs and the close button. */
-  headerActions?: React.ReactNode;
 
   // Artifact props
   artifact?: string | null;
@@ -51,7 +49,6 @@ export function RightSidePanel({
   onTabChange,
   onClose,
   canShowBrowser,
-  headerActions,
   artifact,
   conversationId,
   agentId,
@@ -95,10 +92,8 @@ export function RightSidePanel({
         onValueChange={(value) => onTabChange(value as RightPanelTab)}
         className="flex-1 min-h-0 flex flex-col gap-0"
       >
-        <div className="flex items-center gap-2 border-b px-2 py-2">
-          {/* Tabs take the remaining space and scroll horizontally when the
-              panel is too narrow, so the action buttons on the right are never
-              clipped. */}
+        <div className="flex items-center border-b px-2 py-2">
+          {/* Tabs scroll horizontally when the panel is too narrow. */}
           <div className="min-w-0 flex-1 overflow-x-auto">
             <TabsList className="h-8 w-max">
               <TabsTrigger value="files" className="text-xs px-3">
@@ -112,22 +107,10 @@ export function RightSidePanel({
                 </TabsTrigger>
               )}
               <TabsTrigger value="canvas" className="text-xs px-3">
+                <AppWindow className="h-3 w-3" />
                 MCP App
               </TabsTrigger>
             </TabsList>
-          </div>
-          <div className="flex items-center gap-1 shrink-0">
-            {headerActions}
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7"
-              onClick={onClose}
-              title="Close panel"
-            >
-              <X className="h-4 w-4" />
-              <span className="sr-only">Close panel</span>
-            </Button>
           </div>
         </div>
 

@@ -7,16 +7,11 @@ import {
   AlertTriangle,
   Bot,
   CornerDownLeftIcon,
-  Download,
   FileText,
   Globe,
   MicIcon,
-  MoreVertical,
-  PanelRight,
   PaperclipIcon,
   Plus,
-  Share2,
-  Users,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
@@ -42,6 +37,7 @@ import {
   collectBrowserToolCallIds,
   deriveCanvasesFromMessages,
 } from "@/components/chat/chat-messages.utils";
+import { ChatTopBar } from "@/components/chat/chat-top-bar";
 import { ConversationFilesPanel } from "@/components/chat/conversation-files-panel";
 import { InitialAgentSelector } from "@/components/chat/initial-agent-selector";
 import { OnboardingWizardButton } from "@/components/chat/onboarding-wizard-button";
@@ -72,12 +68,6 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import {
   Empty,
   EmptyContent,
   EmptyDescription,
@@ -85,8 +75,7 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty";
-import { TruncatedTooltip } from "@/components/ui/truncated-tooltip";
-import { TypingText } from "@/components/ui/typing-text";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Version } from "@/components/version";
 import { useDefaultAgentId, useInternalAgents } from "@/lib/agent.query";
 import { useHasPermissions, useSession } from "@/lib/auth/auth.query";
@@ -123,7 +112,6 @@ import {
 } from "@/lib/chat/chat-share.query";
 import {
   conversationStorageKeys,
-  getConversationDisplayTitle,
   getManualCompactionSkippedMessage,
   mergePersistedMessageMetadata,
 } from "@/lib/chat/chat-utils";
@@ -1874,606 +1862,483 @@ export function ChatPageContent({
       canvases={mcpCanvases}
       onShowInSidebar={() => openRightPanelTab("canvas" as RightPanelTab)}
     >
-      <div className="flex h-full w-full min-h-0">
-        <div className="flex-1 flex flex-col min-w-0 min-h-0">
-          <div className="flex flex-col h-full min-h-0">
-            <StreamTimeoutWarning status={status} messages={messages} />
+      <div className="flex flex-col h-full w-full min-h-0">
+        <ChatTopBar
+          conversationId={conversationId}
+          conversation={conversation}
+          headerAnimatingTitles={headerAnimatingTitles}
+          isRightPanelOpen={isRightPanelOpen}
+          onToggleRightPanel={toggleRightPanel}
+          canManageShare={canManageShare}
+          isShared={isShared}
+          hasMessages={!!conversationId && messages.length > 0}
+          onShare={() => setIsShareDialogOpen(true)}
+          onExportMarkdown={handleExportMarkdown}
+        />
+        <div className="flex flex-1 w-full min-h-0">
+          <div className="flex-1 flex flex-col min-w-0 min-h-0">
+            <div className="flex flex-col h-full min-h-0">
+              <StreamTimeoutWarning status={status} messages={messages} />
 
-            <div
-              className={cn(
-                "sticky top-0 z-10 bg-background border-b p-2",
-                !conversationId && "hidden",
+              {/* Mobile: Inline artifact/browser panel below header */}
+              {isRightPanelOpen && (
+                <div className="flex-1 flex flex-col min-h-0 overflow-hidden md:hidden">
+                  <Tabs
+                    value={activeRightTab}
+                    onValueChange={(value) =>
+                      openRightPanelTab(value as RightPanelTab)
+                    }
+                    className="border-b px-2 py-2"
+                  >
+                    <TabsList className="h-8">
+                      <TabsTrigger value="files" className="text-xs px-3">
+                        <FileText className="h-3 w-3" />
+                        Files
+                      </TabsTrigger>
+                      {showBrowserButton && !isPlaywrightSetupVisible && (
+                        <TabsTrigger value="browser" className="text-xs px-3">
+                          <Globe className="h-3 w-3" />
+                          Browser
+                        </TabsTrigger>
+                      )}
+                    </TabsList>
+                  </Tabs>
+                  {activeRightTab === "files" && (
+                    <div className="flex-1 min-h-0 overflow-auto">
+                      <ConversationFilesPanel
+                        conversationId={conversationId}
+                        artifact={conversation?.artifact}
+                        onClose={closeRightPanel}
+                      />
+                    </div>
+                  )}
+                  {activeRightTab === "browser" && isBrowserPanelVisible && (
+                    <div className="flex-1 min-h-0 overflow-auto">
+                      <BrowserPanel
+                        isOpen
+                        onClose={closeRightPanel}
+                        conversationId={conversationId}
+                        agentId={browserToolsAgentId}
+                        onCreateConversationWithUrl={
+                          handleCreateConversationWithUrl
+                        }
+                        isCreatingConversation={
+                          createConversationMutation.isPending
+                        }
+                        initialNavigateUrl={pendingBrowserUrl}
+                        onInitialNavigateComplete={
+                          handleInitialNavigateComplete
+                        }
+                      />
+                    </div>
+                  )}
+                </div>
               )}
-            >
-              <div className="relative flex items-center justify-between gap-2">
-                {/* Left side - conversation title */}
-                {conversationId && conversation && (
-                  <div className="flex items-center flex-shrink min-w-0">
-                    {/* Skip TruncatedTooltip while the title animates: its
-                        resize measurement re-renders on every TypingText tick,
-                        which loops past React's nested-update cap. */}
-                    {headerAnimatingTitles.has(conversation.id) ? (
-                      <h1 className="text-base font-normal text-muted-foreground truncate max-w-[360px] cursor-default">
-                        <TypingText
-                          text={getConversationDisplayTitle(
-                            conversation.title,
-                            conversation.messages,
-                          )}
-                          typingSpeed={35}
-                          showCursor
-                          cursorClassName="bg-muted-foreground"
-                        />
-                      </h1>
+
+              {conversationId ? (
+                <>
+                  {/* Chat content - hidden on mobile when panels are open */}
+                  <div
+                    className={cn(
+                      "flex-1 min-h-0 relative",
+                      isRightPanelOpen && "hidden md:block",
+                    )}
+                  >
+                    {isReadOnlyConversation ? (
+                      <MessageThread
+                        messages={sharedConversationMessages}
+                        chatErrors={conversation?.chatErrors ?? []}
+                        conversationId={conversationId}
+                        containerClassName="h-full"
+                        hideDivider
+                        profileId={conversation?.agent?.id}
+                        agentName={conversation?.agent?.name}
+                        selectedModel={conversation?.modelId ?? undefined}
+                      />
                     ) : (
-                      <TruncatedTooltip
-                        content={getConversationDisplayTitle(
-                          conversation.title,
-                          conversation.messages,
-                        )}
-                      >
-                        <h1 className="text-base font-normal text-muted-foreground truncate max-w-[360px] cursor-default">
-                          {getConversationDisplayTitle(
-                            conversation.title,
-                            conversation.messages,
-                          )}
-                        </h1>
-                      </TruncatedTooltip>
+                      <ChatMessages
+                        conversationId={conversationId}
+                        agentId={
+                          currentProfileId || initialAgentId || undefined
+                        }
+                        messages={messages}
+                        status={status}
+                        isContextCompacting={isContextCompacting}
+                        contextCompactionFeedback={manualCompactionFeedback}
+                        optimisticToolCalls={optimisticToolCalls}
+                        isLoadingConversation={isLoadingConversation}
+                        onMessagesUpdate={setMessages}
+                        agentName={
+                          (currentProfileId
+                            ? internalAgents.find(
+                                (a) => a.id === currentProfileId,
+                              )
+                            : internalAgents.find(
+                                (a) => a.id === initialAgentId,
+                              )
+                          )?.name
+                        }
+                        selectedModel={conversation?.modelId ?? initialModel}
+                        modelSource={
+                          conversationModelSource ?? initialModelSource
+                        }
+                        chatErrors={conversation?.chatErrors ?? []}
+                        compactions={conversation?.compactions ?? []}
+                        onRegenerateUserMessage={regenerateUserMessage}
+                        onProviderConnected={handleProviderConnected}
+                        error={error}
+                        onToolApprovalResponse={
+                          addToolApprovalResponse
+                            ? ({ id, approved, reason }) => {
+                                addToolApprovalResponse({
+                                  id,
+                                  approved,
+                                  reason,
+                                });
+                              }
+                            : undefined
+                        }
+                      />
                     )}
                   </div>
-                )}
-                {/* Right side - desktop: panel toggle */}
-                <div className="hidden md:flex items-center gap-2 flex-shrink-0">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={toggleRightPanel}
-                    className="h-8 w-8"
-                    title={isRightPanelOpen ? "Close panel" : "Open panel"}
-                    aria-pressed={isRightPanelOpen}
-                  >
-                    <PanelRight className="h-4 w-4" />
-                    <span className="sr-only">
-                      {isRightPanelOpen ? "Close panel" : "Open panel"}
-                    </span>
-                  </Button>
-                </div>
-                {/* Right side - mobile: 3-dot dropdown */}
-                <div className="flex md:hidden items-center gap-2 flex-shrink-0">
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8"
-                        title="More options"
-                      >
-                        <MoreVertical className="h-4 w-4" />
-                        <span className="sr-only">More options</span>
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      {canManageShare && (
-                        <DropdownMenuItem
-                          onSelect={() => setIsShareDialogOpen(true)}
-                        >
-                          {isShared ? (
-                            <>
-                              <Users className="h-4 w-4 text-primary" />
-                              <span className="text-primary">Shared</span>
-                            </>
-                          ) : (
-                            <>
-                              <Share2 className="h-4 w-4" />
-                              Share
-                            </>
-                          )}
-                        </DropdownMenuItem>
-                      )}
-                      {conversationId && messages.length > 0 && (
-                        <DropdownMenuItem onSelect={handleExportMarkdown}>
-                          <Download className="h-4 w-4" />
-                          Export Markdown
-                        </DropdownMenuItem>
-                      )}
-                      <DropdownMenuItem
-                        onSelect={() => {
-                          if (isArtifactOpen) {
-                            closeRightPanel();
-                          } else {
-                            openRightPanelTab("files");
-                          }
-                        }}
-                      >
-                        <FileText className="h-4 w-4" />
-                        {isArtifactOpen ? "Hide Files" : "Show Files"}
-                      </DropdownMenuItem>
-                      {showBrowserButton && (
-                        <DropdownMenuItem
-                          onSelect={() => {
-                            if (isBrowserPanelVisible) {
-                              closeRightPanel();
-                            } else {
-                              openRightPanelTab("browser");
-                            }
-                          }}
-                          disabled={isPlaywrightSetupVisible}
-                        >
-                          <Globe className="h-4 w-4" />
-                          {isBrowserPanelVisible
-                            ? "Hide Browser"
-                            : "Show Browser"}
-                        </DropdownMenuItem>
-                      )}
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </div>
-              </div>
-            </div>
 
-            {/* Mobile: Inline artifact/browser panel below header */}
-            {isRightPanelOpen && (
-              <div className="flex-1 flex flex-col min-h-0 overflow-hidden md:hidden">
-                {activeRightTab === "files" && (
-                  <div className="flex-1 min-h-0 overflow-auto">
-                    <ConversationFilesPanel
-                      conversationId={conversationId}
-                      artifact={conversation?.artifact}
-                      onClose={closeRightPanel}
-                    />
-                  </div>
-                )}
-                {activeRightTab === "browser" && isBrowserPanelVisible && (
-                  <div className="flex-1 min-h-0 overflow-auto">
-                    <BrowserPanel
-                      isOpen
-                      onClose={closeRightPanel}
-                      conversationId={conversationId}
-                      agentId={browserToolsAgentId}
-                      onCreateConversationWithUrl={
-                        handleCreateConversationWithUrl
-                      }
-                      isCreatingConversation={
-                        createConversationMutation.isPending
-                      }
-                      initialNavigateUrl={pendingBrowserUrl}
-                      onInitialNavigateComplete={handleInitialNavigateComplete}
-                    />
-                  </div>
-                )}
-              </div>
-            )}
-
-            {conversationId ? (
-              <>
-                {/* Chat content - hidden on mobile when panels are open */}
-                <div
-                  className={cn(
-                    "flex-1 min-h-0 relative",
-                    isRightPanelOpen && "hidden md:block",
-                  )}
-                >
                   {isReadOnlyConversation ? (
-                    <MessageThread
-                      messages={sharedConversationMessages}
-                      chatErrors={conversation?.chatErrors ?? []}
-                      conversationId={conversationId}
-                      containerClassName="h-full"
-                      hideDivider
-                      profileId={conversation?.agent?.id}
-                      agentName={conversation?.agent?.name}
-                      selectedModel={conversation?.modelId ?? undefined}
-                    />
-                  ) : (
-                    <ChatMessages
-                      conversationId={conversationId}
-                      agentId={currentProfileId || initialAgentId || undefined}
-                      messages={messages}
-                      status={status}
-                      isContextCompacting={isContextCompacting}
-                      contextCompactionFeedback={manualCompactionFeedback}
-                      optimisticToolCalls={optimisticToolCalls}
-                      isLoadingConversation={isLoadingConversation}
-                      onMessagesUpdate={setMessages}
-                      agentName={
-                        (currentProfileId
-                          ? internalAgents.find(
-                              (a) => a.id === currentProfileId,
-                            )
-                          : internalAgents.find((a) => a.id === initialAgentId)
-                        )?.name
-                      }
-                      selectedModel={conversation?.modelId ?? initialModel}
-                      modelSource={
-                        conversationModelSource ?? initialModelSource
-                      }
-                      chatErrors={conversation?.chatErrors ?? []}
-                      compactions={conversation?.compactions ?? []}
-                      onRegenerateUserMessage={regenerateUserMessage}
-                      onProviderConnected={handleProviderConnected}
-                      error={error}
-                      onToolApprovalResponse={
-                        addToolApprovalResponse
-                          ? ({ id, approved, reason }) => {
-                              addToolApprovalResponse({ id, approved, reason });
-                            }
-                          : undefined
-                      }
-                    />
-                  )}
-                </div>
-
-                {isReadOnlyConversation ? (
-                  <div className="sticky bottom-0 bg-background border-t p-4">
-                    <div className="max-w-4xl mx-auto space-y-3">
-                      <div className="relative">
-                        <div className="border-input dark:bg-input/30 relative flex w-full flex-col rounded-md border shadow-xs opacity-30 blur-[3px] pointer-events-none select-none">
-                          <div className="px-4 py-5 min-h-[120px]">
-                            <span className="text-sm text-muted-foreground">
-                              Type a message...
-                            </span>
-                          </div>
-                          <div className="flex items-center justify-between w-full px-3 pb-3">
-                            <div className="flex items-center gap-1">
-                              <div className="size-8 flex items-center justify-center">
-                                <PaperclipIcon className="size-4 text-muted-foreground" />
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <div className="size-8 flex items-center justify-center">
-                                <MicIcon className="size-4 text-muted-foreground" />
-                              </div>
-                              <div className="size-8 flex items-center justify-center rounded-md bg-primary">
-                                <CornerDownLeftIcon className="size-4 text-primary-foreground" />
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                        <div className="absolute inset-0 flex items-center justify-center pointer-events-auto">
-                          <Button
-                            onClick={() => {
-                              if (shouldPromptForForkAgentSelection) {
-                                setIsForkDialogOpen(true);
-                                return;
-                              }
-
-                              void handleForkConversation();
-                            }}
-                          >
-                            <Plus className="h-4 w-4" />
-                            Start New Chat from here
-                          </Button>
-                        </div>
-                      </div>
-                      <div className="text-center">
-                        <Version inline />
-                      </div>
-                    </div>
-                  </div>
-                ) : isAgentDeleted ? (
-                  <div className="sticky bottom-0 bg-background border-t p-4">
-                    <div className="max-w-4xl mx-auto">
-                      <div className="flex items-center justify-between gap-4 p-4 rounded-lg border border-muted bg-muted/50">
-                        <div className="flex items-center gap-3 text-muted-foreground">
-                          <AlertTriangle className="h-5 w-5 text-amber-500" />
-                          <span>
-                            The agent associated with this conversation has been
-                            deleted.
-                          </span>
-                        </div>
-                        <Button onClick={() => router.push("/chat")}>
-                          <Plus className="h-4 w-4" />
-                          New Conversation
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
-                ) : (
-                  activeAgentId && (
                     <div className="sticky bottom-0 bg-background border-t p-4">
                       <div className="max-w-4xl mx-auto space-y-3">
-                        <ArchestraPromptInput
-                          onSubmit={handleSubmit}
-                          status={status}
-                          selectedModel={conversation?.modelId ?? ""}
-                          onModelChange={handleModelChange}
-                          agentId={promptAgentId ?? activeAgentId}
-                          conversationId={conversationId}
-                          currentConversationChatApiKeyId={
-                            conversation?.chatApiKeyId
-                          }
-                          currentProvider={currentProvider}
-                          textareaRef={textareaRef}
-                          onProviderChange={handleProviderChange}
-                          allowFileUploads={
-                            organization?.allowChatFileUploads ?? false
-                          }
-                          isModelsLoading={isModelsLoading}
-                          tokensUsed={tokensUsed}
-                          cachedTokens={tokenUsage?.cacheReadTokens}
-                          maxContextLength={selectedModelContextLength}
-                          contextWindow={contextWindow}
-                          lastCompaction={contextCompaction?.lastCompaction}
-                          inputModalities={selectedModelInputModalities}
-                          agentLlmApiKeyId={
-                            conversation?.agent?.llmApiKeyId ?? null
-                          }
-                          submitDisabled={isPlaywrightSetupVisible}
-                          isContextCompacting={isContextCompacting}
-                          onCompactConversation={handleCompactConversation}
-                          isPlaywrightSetupVisible={isPlaywrightSetupVisible}
-                          selectorAgentId={activeAgentId}
-                          selectorAgentName={swappedAgentName ?? undefined}
-                          onAgentChange={handleConversationAgentChange}
-                          modelSource={conversationModelSource}
-                          onResetModelOverride={
-                            handleConversationResetModelOverride
-                          }
-                          agentRequiresPerUserConnect={
-                            conversationPerUserConnect.needsConnect
-                          }
-                          agentModelDisplayName={
-                            conversationPerUserConnect.needsConnect
-                              ? conversationPerUserConnect.modelName
-                              : undefined
-                          }
-                        />
+                        <div className="relative">
+                          <div className="border-input dark:bg-input/30 relative flex w-full flex-col rounded-md border shadow-xs opacity-30 blur-[3px] pointer-events-none select-none">
+                            <div className="px-4 py-5 min-h-[120px]">
+                              <span className="text-sm text-muted-foreground">
+                                Type a message...
+                              </span>
+                            </div>
+                            <div className="flex items-center justify-between w-full px-3 pb-3">
+                              <div className="flex items-center gap-1">
+                                <div className="size-8 flex items-center justify-center">
+                                  <PaperclipIcon className="size-4 text-muted-foreground" />
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <div className="size-8 flex items-center justify-center">
+                                  <MicIcon className="size-4 text-muted-foreground" />
+                                </div>
+                                <div className="size-8 flex items-center justify-center rounded-md bg-primary">
+                                  <CornerDownLeftIcon className="size-4 text-primary-foreground" />
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                          <div className="absolute inset-0 flex items-center justify-center pointer-events-auto">
+                            <Button
+                              onClick={() => {
+                                if (shouldPromptForForkAgentSelection) {
+                                  setIsForkDialogOpen(true);
+                                  return;
+                                }
+
+                                void handleForkConversation();
+                              }}
+                            >
+                              <Plus className="h-4 w-4" />
+                              Start New Chat from here
+                            </Button>
+                          </div>
+                        </div>
                         <div className="text-center">
                           <Version inline />
                         </div>
                       </div>
                     </div>
-                  )
-                )}
-              </>
-            ) : (
-              /* No active chat: centered prompt input */
-              newChatAgentId && (
-                // biome-ignore lint/a11y/noStaticElementInteractions: click-to-focus container
-                // biome-ignore lint/a11y/useKeyWithClickEvents: click-to-focus container
-                <div
-                  className="relative flex-1 flex flex-col min-h-0"
-                  onClick={(e) => {
-                    // Focus textarea when clicking empty space outside interactive elements
-                    if (
-                      e.target === e.currentTarget ||
-                      !(e.target as HTMLElement).closest(
-                        "button, a, input, textarea, [role=combobox], [data-slot=input-group]",
-                      )
-                    ) {
-                      textareaRef.current?.focus();
-                    }
-                  }}
-                >
-                  {((organization?.chatLinks?.length ?? 0) > 0 ||
-                    organization?.onboardingWizard) && (
-                    <div className="absolute top-4 right-4 z-10 flex flex-wrap justify-end gap-2 max-w-[min(100%,36rem)]">
-                      {organization?.chatLinks?.map((link) => (
-                        <ChatLinkButton
-                          key={`link-${link.label}-${link.url}`}
-                          url={link.url}
-                          label={link.label}
-                        />
-                      ))}
-                      {organization?.onboardingWizard && (
-                        <OnboardingWizardButton
-                          wizard={organization.onboardingWizard}
-                        />
-                      )}
-                    </div>
-                  )}
-                  {isPlaywrightSetupRequired && canUpdateAgent && (
-                    <PlaywrightInstallDialog
-                      agentId={playwrightSetupAgentId}
-                      conversationId={conversationId}
-                    />
-                  )}
-                  <div className="flex-1 flex flex-col items-center justify-center p-4 gap-8">
-                    <div className="scale-150">
-                      <AppLogo />
-                    </div>
-                    {(() => {
-                      const currentAgent = internalAgents.find(
-                        (a) => a.id === initialAgentId,
-                      );
-                      const prompts = currentAgent?.suggestedPrompts;
-                      if (!prompts || prompts.length === 0) return null;
-                      return (
-                        <div className="flex flex-wrap items-center justify-center gap-2 max-w-2xl">
-                          {prompts.map((sp) => (
-                            <Suggestion
-                              key={`${sp.summaryTitle}-${sp.prompt}`}
-                              suggestion={sp.summaryTitle}
-                              onClick={() =>
-                                submitInitialMessage({
-                                  text: sp.prompt,
-                                  files: [],
-                                })
-                              }
-                            />
-                          ))}
+                  ) : isAgentDeleted ? (
+                    <div className="sticky bottom-0 bg-background border-t p-4">
+                      <div className="max-w-4xl mx-auto">
+                        <div className="flex items-center justify-between gap-4 p-4 rounded-lg border border-muted bg-muted/50">
+                          <div className="flex items-center gap-3 text-muted-foreground">
+                            <AlertTriangle className="h-5 w-5 text-amber-500" />
+                            <span>
+                              The agent associated with this conversation has
+                              been deleted.
+                            </span>
+                          </div>
+                          <Button onClick={() => router.push("/chat")}>
+                            <Plus className="h-4 w-4" />
+                            New Conversation
+                          </Button>
                         </div>
-                      );
-                    })()}
-                    <div className="w-full max-w-4xl">
-                      <ArchestraPromptInput
-                        onSubmit={handleInitialSubmit}
-                        status={
-                          createConversationMutation.isPending
-                            ? "submitted"
-                            : "ready"
-                        }
-                        selectedModel={initialModel}
-                        onModelChange={handleInitialModelChange}
-                        agentId={newChatAgentId}
-                        currentProvider={initialProvider}
-                        textareaRef={textareaRef}
-                        initialApiKeyId={initialApiKeyId}
-                        onApiKeyChange={setInitialApiKeyId}
-                        onProviderChange={handleInitialProviderChange}
-                        allowFileUploads={
-                          organization?.allowChatFileUploads ?? false
-                        }
-                        isModelsLoading={isModelsLoading}
-                        inputModalities={selectedModelInputModalities}
-                        agentLlmApiKeyId={
-                          (
-                            internalAgents.find(
-                              (a) => a.id === initialAgentId,
-                            ) as Record<string, unknown> | undefined
-                          )?.llmApiKeyId as string | null
-                        }
-                        submitDisabled={isPlaywrightSetupVisible}
-                        isPlaywrightSetupVisible={isPlaywrightSetupVisible}
-                        selectorAgentId={initialAgentId}
-                        onAgentChange={handleInitialAgentChange}
-                        modelSource={initialModelSource}
-                        onResetModelOverride={handleResetModelOverride}
-                        agentRequiresPerUserConnect={
-                          initialPerUserConnect.needsConnect
-                        }
-                        agentModelDisplayName={
-                          initialPerUserConnect.needsConnect
-                            ? initialPerUserConnect.modelName
-                            : undefined
-                        }
+                      </div>
+                    </div>
+                  ) : (
+                    activeAgentId && (
+                      <div className="sticky bottom-0 bg-background border-t p-4">
+                        <div className="max-w-4xl mx-auto space-y-3">
+                          <ArchestraPromptInput
+                            onSubmit={handleSubmit}
+                            status={status}
+                            selectedModel={conversation?.modelId ?? ""}
+                            onModelChange={handleModelChange}
+                            agentId={promptAgentId ?? activeAgentId}
+                            conversationId={conversationId}
+                            currentConversationChatApiKeyId={
+                              conversation?.chatApiKeyId
+                            }
+                            currentProvider={currentProvider}
+                            textareaRef={textareaRef}
+                            onProviderChange={handleProviderChange}
+                            allowFileUploads={
+                              organization?.allowChatFileUploads ?? false
+                            }
+                            isModelsLoading={isModelsLoading}
+                            tokensUsed={tokensUsed}
+                            cachedTokens={tokenUsage?.cacheReadTokens}
+                            maxContextLength={selectedModelContextLength}
+                            contextWindow={contextWindow}
+                            lastCompaction={contextCompaction?.lastCompaction}
+                            inputModalities={selectedModelInputModalities}
+                            agentLlmApiKeyId={
+                              conversation?.agent?.llmApiKeyId ?? null
+                            }
+                            submitDisabled={isPlaywrightSetupVisible}
+                            isContextCompacting={isContextCompacting}
+                            onCompactConversation={handleCompactConversation}
+                            isPlaywrightSetupVisible={isPlaywrightSetupVisible}
+                            selectorAgentId={activeAgentId}
+                            selectorAgentName={swappedAgentName ?? undefined}
+                            onAgentChange={handleConversationAgentChange}
+                            modelSource={conversationModelSource}
+                            onResetModelOverride={
+                              handleConversationResetModelOverride
+                            }
+                            agentRequiresPerUserConnect={
+                              conversationPerUserConnect.needsConnect
+                            }
+                            agentModelDisplayName={
+                              conversationPerUserConnect.needsConnect
+                                ? conversationPerUserConnect.modelName
+                                : undefined
+                            }
+                          />
+                          <div className="text-center">
+                            <Version inline />
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  )}
+                </>
+              ) : (
+                /* No active chat: centered prompt input */
+                newChatAgentId && (
+                  // biome-ignore lint/a11y/noStaticElementInteractions: click-to-focus container
+                  // biome-ignore lint/a11y/useKeyWithClickEvents: click-to-focus container
+                  <div
+                    className="relative flex-1 flex flex-col min-h-0"
+                    onClick={(e) => {
+                      // Focus textarea when clicking empty space outside interactive elements
+                      if (
+                        e.target === e.currentTarget ||
+                        !(e.target as HTMLElement).closest(
+                          "button, a, input, textarea, [role=combobox], [data-slot=input-group]",
+                        )
+                      ) {
+                        textareaRef.current?.focus();
+                      }
+                    }}
+                  >
+                    {((organization?.chatLinks?.length ?? 0) > 0 ||
+                      organization?.onboardingWizard) && (
+                      <div className="absolute top-4 right-4 z-10 flex flex-wrap justify-end gap-2 max-w-[min(100%,36rem)]">
+                        {organization?.chatLinks?.map((link) => (
+                          <ChatLinkButton
+                            key={`link-${link.label}-${link.url}`}
+                            url={link.url}
+                            label={link.label}
+                          />
+                        ))}
+                        {organization?.onboardingWizard && (
+                          <OnboardingWizardButton
+                            wizard={organization.onboardingWizard}
+                          />
+                        )}
+                      </div>
+                    )}
+                    {isPlaywrightSetupRequired && canUpdateAgent && (
+                      <PlaywrightInstallDialog
+                        agentId={playwrightSetupAgentId}
+                        conversationId={conversationId}
                       />
+                    )}
+                    <div className="flex-1 flex flex-col items-center justify-center p-4 gap-8">
+                      <div className="scale-150">
+                        <AppLogo />
+                      </div>
+                      {(() => {
+                        const currentAgent = internalAgents.find(
+                          (a) => a.id === initialAgentId,
+                        );
+                        const prompts = currentAgent?.suggestedPrompts;
+                        if (!prompts || prompts.length === 0) return null;
+                        return (
+                          <div className="flex flex-wrap items-center justify-center gap-2 max-w-2xl">
+                            {prompts.map((sp) => (
+                              <Suggestion
+                                key={`${sp.summaryTitle}-${sp.prompt}`}
+                                suggestion={sp.summaryTitle}
+                                onClick={() =>
+                                  submitInitialMessage({
+                                    text: sp.prompt,
+                                    files: [],
+                                  })
+                                }
+                              />
+                            ))}
+                          </div>
+                        );
+                      })()}
+                      <div className="w-full max-w-4xl">
+                        <ArchestraPromptInput
+                          onSubmit={handleInitialSubmit}
+                          status={
+                            createConversationMutation.isPending
+                              ? "submitted"
+                              : "ready"
+                          }
+                          selectedModel={initialModel}
+                          onModelChange={handleInitialModelChange}
+                          agentId={newChatAgentId}
+                          currentProvider={initialProvider}
+                          textareaRef={textareaRef}
+                          initialApiKeyId={initialApiKeyId}
+                          onApiKeyChange={setInitialApiKeyId}
+                          onProviderChange={handleInitialProviderChange}
+                          allowFileUploads={
+                            organization?.allowChatFileUploads ?? false
+                          }
+                          isModelsLoading={isModelsLoading}
+                          inputModalities={selectedModelInputModalities}
+                          agentLlmApiKeyId={
+                            (
+                              internalAgents.find(
+                                (a) => a.id === initialAgentId,
+                              ) as Record<string, unknown> | undefined
+                            )?.llmApiKeyId as string | null
+                          }
+                          submitDisabled={isPlaywrightSetupVisible}
+                          isPlaywrightSetupVisible={isPlaywrightSetupVisible}
+                          selectorAgentId={initialAgentId}
+                          onAgentChange={handleInitialAgentChange}
+                          modelSource={initialModelSource}
+                          onResetModelOverride={handleResetModelOverride}
+                          agentRequiresPerUserConnect={
+                            initialPerUserConnect.needsConnect
+                          }
+                          agentModelDisplayName={
+                            initialPerUserConnect.needsConnect
+                              ? initialPerUserConnect.modelName
+                              : undefined
+                          }
+                        />
+                      </div>
+                    </div>
+                    <div className="p-4 text-center">
+                      <Version inline />
                     </div>
                   </div>
-                  <div className="p-4 text-center">
-                    <Version inline />
-                  </div>
-                </div>
-              )
-            )}
+                )
+              )}
+            </div>
           </div>
-        </div>
 
-        {/* Right-side panel - desktop only */}
-        <div className="hidden md:flex h-full min-h-0">
-          <RightSidePanel
-            isOpen={isRightPanelOpen}
-            activeTab={activeRightTab}
-            onTabChange={openRightPanelTab}
-            onClose={closeRightPanel}
-            canShowBrowser={showBrowserButton && !isPlaywrightSetupVisible}
-            headerActions={
-              conversationId && messages.length > 0 ? (
-                <div className="flex items-center gap-1">
-                  {canManageShare && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setIsShareDialogOpen(true)}
-                      className="text-xs h-7"
-                    >
-                      {isShared ? (
-                        <>
-                          <Users className="h-3 w-3 mr-1 text-primary" />
-                          <span className="text-primary">Shared</span>
-                        </>
-                      ) : (
-                        <>
-                          <Share2 className="h-3 w-3 mr-1" />
-                          Share
-                        </>
-                      )}
-                    </Button>
-                  )}
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={handleExportMarkdown}
-                    className="text-xs h-7"
-                    title="Download chat as Markdown"
-                  >
-                    <Download className="h-3 w-3 mr-1" />
-                    Markdown
-                  </Button>
-                </div>
-              ) : undefined
+          {/* Right-side panel - desktop only */}
+          <div className="hidden md:flex h-full min-h-0">
+            <RightSidePanel
+              isOpen={isRightPanelOpen}
+              activeTab={activeRightTab}
+              onTabChange={openRightPanelTab}
+              onClose={closeRightPanel}
+              canShowBrowser={showBrowserButton && !isPlaywrightSetupVisible}
+              artifact={conversation?.artifact}
+              conversationId={conversationId}
+              agentId={browserToolsAgentId}
+              onCreateConversationWithUrl={handleCreateConversationWithUrl}
+              isCreatingConversation={createConversationMutation.isPending}
+              initialNavigateUrl={pendingBrowserUrl}
+              onInitialNavigateComplete={handleInitialNavigateComplete}
+            />
+          </div>
+
+          <CustomServerRequestDialog
+            isOpen={isDialogOpened("custom-request")}
+            onClose={() => closeDialog("custom-request")}
+          />
+          <CreateCatalogDialog
+            isOpen={isDialogOpened("create-catalog")}
+            onClose={() => closeDialog("create-catalog")}
+            onSuccess={() => router.push("/mcp/registry")}
+          />
+          <AgentDialog
+            open={isDialogOpened("edit-agent")}
+            onOpenChange={(open) => {
+              if (!open) closeDialog("edit-agent");
+            }}
+            agent={
+              conversationId && conversation
+                ? _conversationInternalAgent
+                : initialAgentId
+                  ? internalAgents.find((a) => a.id === initialAgentId)
+                  : undefined
             }
-            artifact={conversation?.artifact}
-            conversationId={conversationId}
-            agentId={browserToolsAgentId}
-            onCreateConversationWithUrl={handleCreateConversationWithUrl}
-            isCreatingConversation={createConversationMutation.isPending}
-            initialNavigateUrl={pendingBrowserUrl}
-            onInitialNavigateComplete={handleInitialNavigateComplete}
+            agentType="agent"
           />
-        </div>
 
-        <CustomServerRequestDialog
-          isOpen={isDialogOpened("custom-request")}
-          onClose={() => closeDialog("custom-request")}
-        />
-        <CreateCatalogDialog
-          isOpen={isDialogOpened("create-catalog")}
-          onClose={() => closeDialog("create-catalog")}
-          onSuccess={() => router.push("/mcp/registry")}
-        />
-        <AgentDialog
-          open={isDialogOpened("edit-agent")}
-          onOpenChange={(open) => {
-            if (!open) closeDialog("edit-agent");
-          }}
-          agent={
-            conversationId && conversation
-              ? _conversationInternalAgent
-              : initialAgentId
-                ? internalAgents.find((a) => a.id === initialAgentId)
-                : undefined
-          }
-          agentType="agent"
-        />
+          {canManageShare && conversationId && (
+            <ShareConversationDialog
+              conversationId={conversationId}
+              open={isShareDialogOpen}
+              onOpenChange={setIsShareDialogOpen}
+            />
+          )}
 
-        {canManageShare && conversationId && (
-          <ShareConversationDialog
-            conversationId={conversationId}
-            open={isShareDialogOpen}
-            onOpenChange={setIsShareDialogOpen}
-          />
-        )}
-
-        <StandardDialog
-          open={isForkDialogOpen}
-          onOpenChange={setIsForkDialogOpen}
-          title="Start New Chat"
-          description={
-            shouldPromptForForkAgentSelection
-              ? "The original agent is not available to you. Select another agent to start a new chat with the preloaded messages from this conversation."
-              : "Select an agent to start a new chat with the preloaded messages from this conversation."
-          }
-          size="small"
-          bodyClassName="py-1"
-          footer={
-            <>
-              <Button
-                variant="outline"
-                onClick={() => setIsForkDialogOpen(false)}
-              >
-                Cancel
-              </Button>
-              <Button
-                onClick={handleForkConversation}
-                disabled={
-                  !effectiveForkAgentId ||
-                  forkConversationMutation.isPending ||
+          <StandardDialog
+            open={isForkDialogOpen}
+            onOpenChange={setIsForkDialogOpen}
+            title="Start New Chat"
+            description={
+              shouldPromptForForkAgentSelection
+                ? "The original agent is not available to you. Select another agent to start a new chat with the preloaded messages from this conversation."
+                : "Select an agent to start a new chat with the preloaded messages from this conversation."
+            }
+            size="small"
+            bodyClassName="py-1"
+            footer={
+              <>
+                <Button
+                  variant="outline"
+                  onClick={() => setIsForkDialogOpen(false)}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  onClick={handleForkConversation}
+                  disabled={
+                    !effectiveForkAgentId ||
+                    forkConversationMutation.isPending ||
+                    forkSharedConversationMutation.isPending
+                  }
+                >
+                  {forkConversationMutation.isPending ||
                   forkSharedConversationMutation.isPending
-                }
-              >
-                {forkConversationMutation.isPending ||
-                forkSharedConversationMutation.isPending
-                  ? "Creating..."
-                  : "Start Chat"}
-              </Button>
-            </>
-          }
-        >
-          <InitialAgentSelector
-            currentAgentId={forkAgentId}
-            onAgentChange={setForkAgentId}
-          />
-        </StandardDialog>
+                    ? "Creating..."
+                    : "Start Chat"}
+                </Button>
+              </>
+            }
+          >
+            <InitialAgentSelector
+              currentAgentId={forkAgentId}
+              onAgentChange={setForkAgentId}
+            />
+          </StandardDialog>
+        </div>
       </div>
     </PinnedCanvasProvider>
   );
