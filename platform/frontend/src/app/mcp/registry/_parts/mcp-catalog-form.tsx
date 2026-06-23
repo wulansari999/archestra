@@ -1248,6 +1248,19 @@ export function McpCatalogForm({
                             placeholder={`/path/to/server.js\n--verbose`}
                             className="font-mono min-h-20"
                             {...field}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              if (val.trim().startsWith("[")) {
+                                try {
+                                  const parsed = JSON.parse(val);
+                                  if (Array.isArray(parsed)) {
+                                    field.onChange(parsed.join("\n"));
+                                    return;
+                                  }
+                                } catch (err) {}
+                              }
+                              field.onChange(val);
+                            }}
                           />
                         </FormControl>
                         <FormMessage />
@@ -2642,7 +2655,7 @@ function additionalHeadersChangeRequiresReinstall(
   for (const [key, p] of prevMap) {
     const n = nextMap.get(key);
     if (!n) return true; // Removed
-    if (!p.required && Boolean(n.required)) return true; // Became required
+    if (!p.required && n.required) return true; // Became required
     if ((p.headerName ?? "") !== (n.headerName ?? "")) return true; // Routing
     if (Boolean(p.sensitive) !== Boolean(n.sensitive)) return true; // Storage
     // Static header value rotation. `value` only matters at runtime
