@@ -84,6 +84,7 @@ export {
   default as conversationSharesTable,
 } from "./conversation-share";
 export { default as environmentsTable } from "./environment";
+export { default as environmentDefaultUserLimitsTable } from "./environment-default-user-limits";
 export { default as filesTable } from "./file";
 export { default as githubAppConfigsTable } from "./github-app-config";
 export { default as hookFilesTable } from "./hook-file";
@@ -168,3 +169,5 @@ export { default as verificationsTable } from "./verification";
 export { default as virtualApiKeysTable } from "./virtual-api-key";
 export { default as virtualApiKeyProviderApiKeysTable } from "./virtual-api-key-provider-api-key";
 export { default as virtualApiKeyTeamsTable } from "./virtual-api-key-team";
+
+export { agentMemoryTable as agentMemoriesTable } from "./agent-memory";

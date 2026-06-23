@@ -1662,6 +1662,11 @@ function handleRuntimeError(
   sandboxId: SandboxId,
   tool: string,
 ) {
+  if (error instanceof FileNameExistsError) {
+    return errorResult(
+      `${error.message}. Choose a different name, or delete the existing file first.`,
+    );
+  }
   if (error instanceof SkillSandboxError) {
     return errorResult(error.message);
   }
@@ -2008,8 +2013,12 @@ function formatCommandSummary(result: {
     );
   }
   lines.push("", "stdout:", result.stdout || "(empty)");
-  if (result.stderr) {
-    lines.push("", "stderr:", result.stderr);
+  // On a non-zero exit always surface a stderr section (marked empty when truly
+  // blank) — symmetric to stdout, so a failing command never leaves the agent
+  // unable to tell "no stderr" from "stderr withheld". On success keep it terse:
+  // only show stderr when there is something to show.
+  if (result.stderr || result.exitCode !== 0) {
+    lines.push("", "stderr:", result.stderr || "(empty)");
   }
   return lines.join("\n");
 }

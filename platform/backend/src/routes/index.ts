@@ -13,6 +13,7 @@ export { default as chatRoutes } from "./chat/routes";
 export { default as chatopsRoutes } from "./chatops";
 export { default as configRoutes } from "./config";
 export { default as connectionSetupRoutes } from "./connection-setup/connection-setup.routes";
+export { default as defaultUserLimitRoutes } from "./default-user-limit";
 export { default as environmentRoutes } from "./environment";
 export { default as githubAppConfigRoutes } from "./github-app-config";
 export { default as githubCopilotAuthRoutes } from "./github-copilot-auth/github-copilot-auth.routes";
@@ -77,3 +78,5 @@ export { default as toolRoutes } from "./tool";
 export { default as userRoutes } from "./user";
 export { default as userTokenRoutes } from "./user-token";
 export { default as virtualApiKeysRoutes } from "./virtual-api-key/virtual-api-key.routes";
+
+export { default as agentMemoryRoutes } from "./agent-memory/agent-memory.routes";

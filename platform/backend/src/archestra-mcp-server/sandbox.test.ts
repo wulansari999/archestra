@@ -16,12 +16,14 @@ import {
   ConversationFileTouchModel,
   ConversationModel,
   FileModel,
+  FileNameExistsError,
   ProjectModel,
   SkillModel,
   SkillSandboxModel,
   SkillSandboxReplayEventModel,
   SkillVersionModel,
 } from "@/models";
+import { sandboxRuntimeService } from "@/sandbox-runtime/sandbox-runtime-service";
 import { executionSandboxRegistry } from "@/skills-sandbox/execution-sandbox-registry";
 import { fileStore } from "@/skills-sandbox/file-store";
 import { skillSandboxRuntimeService } from "@/skills-sandbox/skill-sandbox-runtime-service";
@@ -36,7 +38,7 @@ import {
   test,
   vi,
 } from "@/test";
-import type { Agent } from "@/types";
+import { type Agent, asSandboxId } from "@/types";
 import {
   type ArchestraContext,
   executeArchestraTool,
@@ -304,6 +306,63 @@ describe("sandbox tools (runtime enabled)", () => {
         ),
       );
       expect(clean).not.toContain("binary (NUL) bytes");
+    });
+
+    test("surfaces an empty-stderr section on a non-zero exit, but not on success", async () => {
+      const ctx = await makeConversationCtx();
+      const spy = vi.spyOn(skillSandboxRuntimeService, "runCommand");
+
+      // a command failed without writing to stderr: the model must still see an
+      // explicit (empty) stderr section so it can tell "no stderr" from "stderr
+      // withheld" rather than the section silently vanishing.
+      spy.mockResolvedValue({
+        commandId: "cmd-1",
+        sandboxId: "x" as any,
+        command: "exit 1",
+        cwd: null,
+        stdout: "",
+        stderr: "",
+        exitCode: 1,
+        durationMs: 5,
+        timedOut: false,
+        truncated: false,
+        binaryStripped: false,
+        stagingNotices: [],
+      });
+      const failed = textOf(
+        await executeArchestraTool(
+          TOOL_RUN_COMMAND_FULL_NAME,
+          { command: "exit 1" },
+          ctx,
+        ),
+      );
+      // Assert the empty marker belongs to the stderr section specifically — stdout is
+      // also empty here, so a bare "(empty)" check could pass on the stdout section alone.
+      expect(failed).toContain("stderr:\n(empty)");
+
+      // success with empty stderr stays terse — no stderr section.
+      spy.mockResolvedValue({
+        commandId: "cmd-2",
+        sandboxId: "x" as any,
+        command: "true",
+        cwd: null,
+        stdout: "",
+        stderr: "",
+        exitCode: 0,
+        durationMs: 5,
+        timedOut: false,
+        truncated: false,
+        binaryStripped: false,
+        stagingNotices: [],
+      });
+      const ok = textOf(
+        await executeArchestraTool(
+          TOOL_RUN_COMMAND_FULL_NAME,
+          { command: "true" },
+          ctx,
+        ),
+      );
+      expect(ok).not.toContain("stderr:");
     });
 
     test("omits the truncation warning when output is complete", async () => {
@@ -735,6 +794,55 @@ describe("sandbox tools (runtime enabled)", () => {
       expect(result.isError).toBe(false);
       const contents = result.content as Array<{ type: string }>;
       expect(contents.map((c) => c.type)).toEqual(["text"]);
+    });
+
+    test("surfaces a name collision as a clean, non-retryable error", async () => {
+      const ctx = await makeConversationCtx();
+      vi.spyOn(skillSandboxRuntimeService, "exportArtifact").mockRejectedValue(
+        new FileNameExistsError("report.pdf"),
+      );
+
+      const result = await executeArchestraTool(
+        TOOL_DOWNLOAD_FILE_FULL_NAME,
+        { path: "out/report.pdf", mimeType: "application/pdf" },
+        ctx,
+      );
+
+      expect(result.isError).toBe(true);
+      const text = textOf(result);
+      expect(text).toContain("already exists");
+      expect(text).not.toContain("Try the operation again");
+    });
+
+    // Guards the propagation path the handler test above cannot reach: the real
+    // exportArtifact must let a typed name collision escape rather than flatten it
+    // into a generic, retryable storage error. Only the Dagger boundary is stubbed.
+    test("exportArtifact rethrows a name collision instead of masking it", async () => {
+      const sandbox = await SkillSandboxModel.create({
+        organizationId,
+        userId,
+        conversationId: null,
+        defaultCwd: "/home/sandbox",
+      });
+      // Stub only the Dagger runtime boundary: its availability gate and the
+      // artifact read. fileStore + the files table stay real so the collision
+      // (and its rethrow) is genuine.
+      vi.spyOn(sandboxRuntimeService, "isEnabled", "get").mockReturnValue(true);
+      vi.spyOn(sandboxRuntimeService, "readArtifact").mockResolvedValue({
+        dataBase64: Buffer.from("pi=3.14159").toString("base64"),
+        sizeBytes: 10,
+      });
+
+      const params = {
+        sandboxId: asSandboxId(sandbox.id),
+        caller: { userId, organizationId },
+        path: "out/result.txt",
+        projectId: null,
+      };
+      await skillSandboxRuntimeService.exportArtifact(params);
+      await expect(
+        skillSandboxRuntimeService.exportArtifact(params),
+      ).rejects.toBeInstanceOf(FileNameExistsError);
     });
   });
 

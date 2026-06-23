@@ -1,4 +1,9 @@
 export const RouteId = {
+  // Agent Memories
+  GetAgentMemories: "getAgentMemories",
+  CreateAgentMemory: "createAgentMemory",
+  UpdateAgentMemory: "updateAgentMemory",
+  DeleteAgentMemory: "deleteAgentMemory",
   // Agent Routes
   GetAgents: "getAgents",
   GetAllAgents: "getAllAgents",
@@ -372,6 +377,12 @@ export const RouteId = {
   GetLimit: "getLimit",
   UpdateLimit: "updateLimit",
   DeleteLimit: "deleteLimit",
+
+  // Per-environment default user limits
+  ListDefaultUserLimits: "listDefaultUserLimits",
+  CreateDefaultUserLimit: "createDefaultUserLimit",
+  UpdateDefaultUserLimit: "updateDefaultUserLimit",
+  DeleteDefaultUserLimit: "deleteDefaultUserLimit",
 
   // Organization Routes
   GetOrganization: "getOrganization",
