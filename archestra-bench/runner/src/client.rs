@@ -397,6 +397,22 @@ impl EvalClient {
         require_str_field(&body, "id", "POST /api/teams")
     }
 
+    /// Create a project. Files produced in its conversations are owned by the project rather than the
+    /// author, so lanes sharing one backend stay isolated even when they save identically named files.
+    pub async fn create_project(&self, name: &str) -> Result<String, ClientError> {
+        let body = require_dict(
+            self.request(
+                Method::POST,
+                "/api/projects",
+                None,
+                Some(&serde_json::json!({"name": name})),
+            )
+            .await?,
+            "POST /api/projects",
+        )?;
+        require_str_field(&body, "id", "POST /api/projects")
+    }
+
     pub async fn list_skills(
         &self,
         search: Option<&str>,
@@ -564,12 +580,19 @@ impl EvalClient {
         title: Option<&str>,
         model_id: Option<&str>,
         chat_api_key_id: Option<&str>,
+        project_id: Option<&str>,
     ) -> Result<HashMap<String, JsonValue>, ClientError> {
         let mut body = serde_json::Map::new();
         body.insert(
             "agentId".to_string(),
             JsonValue::String(agent_id.to_string()),
         );
+        if let Some(project_id) = project_id {
+            body.insert(
+                "projectId".to_string(),
+                JsonValue::String(project_id.to_string()),
+            );
+        }
         if let Some(title) = title {
             body.insert("title".to_string(), JsonValue::String(title.to_string()));
         }
@@ -690,22 +713,44 @@ impl EvalClient {
             ("sortBy".to_string(), "createdAt".to_string()),
             ("sortDirection".to_string(), "asc".to_string()),
         ];
-        let body = self
-            .request(Method::GET, "/api/interactions", Some(&params), None)
-            .await?;
+        // Post-run enrichment polls this endpoint repeatedly while many rollouts hammer the same
+        // backend, so a transient transport failure (timeout / dropped connection, surfaced as
+        // status 0) is expected under load. Retry those with linear backoff so one slow poll does
+        // not abort the whole interaction capture; genuine HTTP errors propagate immediately.
+        // Up to this many retries on top of the initial request (so 5 total attempts at worst).
+        const MAX_TRANSIENT_RETRIES: u32 = 4;
+        const RETRY_BACKOFF: Duration = Duration::from_millis(500);
+        let mut attempt = 0u32;
+        let body = loop {
+            match self
+                .request(Method::GET, "/api/interactions", Some(&params), None)
+                .await
+            {
+                Ok(body) => break body,
+                Err(e) if e.status == 0 && attempt < MAX_TRANSIENT_RETRIES => {
+                    attempt += 1;
+                    sleep(RETRY_BACKOFF * attempt).await;
+                }
+                Err(e) => return Err(e.into()),
+            }
+        };
         let data = body
             .get("data")
             .and_then(JsonValue::as_array)
             .cloned()
             .ok_or_else(|| {
-                ContractError(format!("GET /api/interactions: missing `data` array: {body}"))
+                ContractError(format!(
+                    "GET /api/interactions: missing `data` array: {body}"
+                ))
             })?;
         let total = body
             .get("pagination")
             .and_then(|p| p.get("total"))
             .and_then(JsonValue::as_u64)
             .ok_or_else(|| {
-                ContractError(format!("GET /api/interactions: missing `pagination.total`: {body}"))
+                ContractError(format!(
+                    "GET /api/interactions: missing `pagination.total`: {body}"
+                ))
             })? as usize;
         Ok((data, total))
     }
