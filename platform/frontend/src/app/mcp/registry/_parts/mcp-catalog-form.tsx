@@ -1222,6 +1222,30 @@ export function McpCatalogForm({
                             className="font-mono"
                             autoComplete={MCP_CONFIG_AUTOCOMPLETE}
                             {...field}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              if (val.trim().startsWith("[")) {
+                                try {
+                                  const parsed = JSON.parse(val);
+                                  if (
+                                    Array.isArray(parsed) &&
+                                    parsed.length > 0
+                                  ) {
+                                    field.onChange(parsed[0]);
+                                    // Set the rest to arguments
+                                    if (parsed.length > 1) {
+                                      form.setValue(
+                                        "localConfig.arguments",
+                                        parsed.slice(1).join("\n"),
+                                        { shouldDirty: true },
+                                      );
+                                    }
+                                    return;
+                                  }
+                                } catch (_err) {}
+                              }
+                              field.onChange(val);
+                            }}
                           />
                         </FormControl>
                         <FormDescription>
