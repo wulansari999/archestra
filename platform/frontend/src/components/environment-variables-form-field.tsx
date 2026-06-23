@@ -161,15 +161,68 @@ export function EnvironmentVariablesFormField<
             {labelSuffix}
           </h3>
         )}
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={() => setEnvVarDialog({ mode: "add" })}
-        >
-          <Plus className="h-4 w-4" />
-          Add Variable
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              const pasted = prompt("Paste JSON object or dotenv format here:");
+              if (!pasted) return;
+
+              try {
+                let parsed: Record<string, string>;
+                if (pasted.trim().startsWith("{")) {
+                  parsed = JSON.parse(pasted);
+                } else {
+                  parsed = pasted.split("\n").reduce((acc, line) => {
+                    const idx = line.indexOf("=");
+                    if (idx > 0) {
+                      acc[line.substring(0, idx).trim()] = line
+                        .substring(idx + 1)
+                        .trim();
+                    }
+                    return acc;
+                  }, {});
+                }
+
+                if (
+                  typeof parsed === "object" &&
+                  !Array.isArray(parsed) &&
+                  parsed !== null
+                ) {
+                  Object.entries(parsed).forEach(([k, v]) => {
+                    append({
+                      key: k,
+                      type: "plain_text",
+                      scope: disablePromptOnInstallation
+                        ? "static"
+                        : "installation",
+                      value: typeof v === "string" ? v : JSON.stringify(v),
+                      promptOnInstallation: !disablePromptOnInstallation,
+                      required: !disablePromptOnInstallation,
+                      description: "",
+                    });
+                  });
+                }
+              } catch (err) {
+                alert("Failed to parse input: " + err.message);
+              }
+            }}
+          >
+            <Plus className="h-4 w-4 mr-1" />
+            Paste JSON/Env
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setEnvVarDialog({ mode: "add" })}
+          >
+            <Plus className="h-4 w-4" />
+            Add Variable
+          </Button>
+        </div>
       </div>
       {/* Filter out mounted secrets - they go in the Secret Files section */}
       {(() => {
