@@ -83,3 +83,5 @@ export * from "./user";
 export * from "./user-token";
 export * from "./virtual-api-key";
 export * from "./visibility";
+
+export * from "./agent-memory";
