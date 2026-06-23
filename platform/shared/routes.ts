@@ -1,4 +1,9 @@
 export const RouteId = {
+  // Agent Memories
+  GetAgentMemories: "getAgentMemories",
+  CreateAgentMemory: "createAgentMemory",
+  UpdateAgentMemory: "updateAgentMemory",
+  DeleteAgentMemory: "deleteAgentMemory",
   // Agent Routes
   GetAgents: "getAgents",
   GetAllAgents: "getAllAgents",

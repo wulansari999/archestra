@@ -451,6 +451,11 @@ export const permissionDescriptions: Record<string, string> = {
 export const requiredEndpointPermissionsMap: Partial<
   Record<RouteId, Permissions>
 > = {
+  // Agent Memories
+  [RouteId.GetAgentMemories]: { interaction: ["read"] },
+  [RouteId.CreateAgentMemory]: { interaction: ["create"] },
+  [RouteId.UpdateAgentMemory]: { interaction: ["update"] },
+  [RouteId.DeleteAgentMemory]: { interaction: ["delete"] },
   /**
    * Getting basic info about the organization and marking onboarding as complete
    * require the user to be authenticated but don't require any specific permissions.
